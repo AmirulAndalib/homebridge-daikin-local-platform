@@ -151,7 +151,22 @@ export default class ClimateAccessory {
 
     this.services['HumiditySensor'].getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
       .onGet(this.getCurrentRelativeHumidity.bind(this));
-    
+
+    // Separate service so it doesn't collide with HeaterCooler's
+    // CurrentTemperature, which reports the indoor value.
+    this.services['OutdoorTemperatureSensor'] =
+      this.accessory.getServiceById(this.platform.Service.TemperatureSensor, 'outdoor')
+      || this.accessory.addService(this.platform.Service.TemperatureSensor, 'Outdoor Temperature', 'outdoor');
+
+    this.services['OutdoorTemperatureSensor']
+      .getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+      .setProps({
+        minValue: -100,
+        maxValue: 100,
+        minStep: 0.5,
+      })
+      .onGet(this.getOutdoorTemperature.bind(this));
+
     //////////
     // Update characteristic values asynchronously instead of using onGet handlers
     this.refreshDeviceStatus();
@@ -269,7 +284,7 @@ export default class ClimateAccessory {
   }
   
   async getCurrentRelativeHumidity():Promise<CharacteristicValue> {
-      
+
     try{
       this.platform.log.debug(`Accessory: getCurrentRelativeHumidity() for device '${this.accessory.displayName}'`);
     }catch(e){
@@ -279,6 +294,20 @@ export default class ClimateAccessory {
     return this.accessory.context.device.getIndoorHumidity();
 
 
+  }
+
+  async getOutdoorTemperature():Promise<CharacteristicValue> {
+    this.platform.log.debug(`Accessory: getOutdoorTemperature() for device '${this.accessory.displayName}'`);
+
+    const value = this.accessory.context.device.getOutdoorTemperature();
+    if (Number.isFinite(value)) {
+      return value;
+    }
+    // Outdoor unit hasn't reported yet (e.g. AC just powered on); keep
+    // whatever HomeKit already has cached rather than spike to 0.
+    const cached = this.services['OutdoorTemperatureSensor']
+      .getCharacteristic(this.platform.Characteristic.CurrentTemperature).value;
+    return typeof cached === 'number' ? cached : 0;
   }
 
 
@@ -501,7 +530,13 @@ export default class ClimateAccessory {
       this.services['Climate'].updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.accessory.context.device.getTargetTemperatureWithMode(CLIMATE_MODE_COOLING));
   
       this.services['HumiditySensor'].updateCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity, this.accessory.context.device.getIndoorHumidity());
-      
+
+      const outdoorTemp = this.accessory.context.device.getOutdoorTemperature();
+      if (Number.isFinite(outdoorTemp)) {
+        this.services['OutdoorTemperatureSensor']
+          .updateCharacteristic(this.platform.Characteristic.CurrentTemperature, outdoorTemp);
+      }
+
       //this.services['MotionSensor'].updateCharacteristic(this.platform.Characteristic.On, this.accessory.context.device.getMotionDetection());
 
     }catch(e){

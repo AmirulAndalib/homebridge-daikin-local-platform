@@ -189,6 +189,22 @@ export class DaikinDevice {
     return parseInt(this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_A00B/p_02'), 16);
   }
 
+  // Outdoor temperature lives on the outdoor unit at adr_0200, encoded as
+  // little-endian signed int16 of (temperature * 2). Returns NaN if absent.
+  public getOutdoorTemperature(): number {
+    const raw = this.extractValue(this._Response, '/dsiot/edge/adr_0200.dgc_status', 'e_1003/e_A00D/p_01');
+    if (typeof raw !== 'string' || raw.length !== 4) {
+      return NaN;
+    }
+    const lo = parseInt(raw.substring(0, 2), 16);
+    const hi = parseInt(raw.substring(2, 4), 16);
+    let val = (hi << 8) | lo;
+    if (val & 0x8000) {
+      val -= 0x10000;
+    }
+    return val / 2;
+  }
+
   //0000:fan 0100:heating 0200:cooling 0300:auto 0500:dehumidify
   public getOperationMode(): string {
 
@@ -659,7 +675,7 @@ export class DaikinLocalAPI {
   }
 
   public async fetchDevices(climateIPs:string[], bForce:boolean = false): Promise<DaikinDevice[]> {
-    
+
     this.log.debug('Daikin: fetchDevices()');
     this._devices = [];
 
@@ -668,15 +684,12 @@ export class DaikinLocalAPI {
 
       if(await daikinDevice.fetchDeviceStatus(bForce)) {
         this._devices.push(daikinDevice);
-      }        
-    
+      }
+
     }
 
     return this._devices;
   }
-
- 
-
 
 }
 
