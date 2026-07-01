@@ -129,7 +129,7 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
           }
         }
         catch (e) {
-          this.log.error(`Error setting logger for device ${devices[i].getDeviceName()}: ${e}`);
+          this.log.error(`Error registering device ${devices[i].getDeviceName()}: ${e}`);
           continue;
         }
 
@@ -155,7 +155,7 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
           }
 
         }catch (e) {
-          this.log.error(`Error setting logger for device ${cachedAccessory.displayName}: ${e}`);
+          this.log.error(`Error removing stale accessory ${cachedAccessory.displayName}: ${e}`);
           continue;
         }
 

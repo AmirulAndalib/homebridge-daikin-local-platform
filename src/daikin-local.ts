@@ -5,7 +5,8 @@ import rateLimit from 'axios-rate-limit';
 import {
   USER_AGENT,
   ENDPOINT,
-  SECONDS_BETWEEN_REQUEST
+  MIN_REQUEST_INTERVAL_MS,
+  REQUEST_TIMEOUT_MS
 } from './const';
 
 export const CLIMATE_MODE_FAN = '0000';
@@ -68,7 +69,9 @@ export class DaikinDevice {
   protected _Response: object;
   protected _log: DaikinPlatformLogger;
   protected _lastUpdateTimestamp: number = 0;
-  protected _callback: any = null;
+  protected _callback: ((device: DaikinDevice) => void) | null = null;
+  // Shared promise for an in-flight query so concurrent reads don't each hit the unit.
+  protected _inflightQuery: Promise<any> | null = null;
 
   constructor(
     public readonly IP: string,
@@ -79,7 +82,7 @@ export class DaikinDevice {
     this._log = log;
   }
 
-  public setCallback(callback:any) {
+  public setCallback(callback: (device: DaikinDevice) => void) {
     this._callback = callback;
   }
 
@@ -93,38 +96,62 @@ export class DaikinDevice {
         'User-Agent': USER_AGENT,
       },
       data,
+      timeout: REQUEST_TIMEOUT_MS,
     });
   }
 
   public async queryDevice(bForce:boolean = false): Promise<any> {
 
-    if(!bForce && (Date.now() - this._lastUpdateTimestamp) < SECONDS_BETWEEN_REQUEST) {
-      this.log.debug(`Daikin - queryDevice('${this._IP}'): Skipping query as last update was less than ${SECONDS_BETWEEN_REQUEST} micro seconds ago`);
-      return this._Response;
+    if(!bForce) {
+      if((Date.now() - this._lastUpdateTimestamp) < MIN_REQUEST_INTERVAL_MS) {
+        this.log.debug(`Daikin - queryDevice('${this._IP}'): Skipping query as last update was less than ${MIN_REQUEST_INTERVAL_MS} ms ago`);
+        return this._Response;
+      }
+
+      // Coalesce concurrent (non-forced) reads onto a single request.
+      if(this._inflightQuery) {
+        return this._inflightQuery;
+      }
     }
+
+    const request = this._doQuery();
+
+    if(!bForce) {
+      this._inflightQuery = request;
+    }
+
+    try {
+      return await request;
+    }
+    finally {
+      if(this._inflightQuery === request) {
+        this._inflightQuery = null;
+      }
+    }
+  }
+
+  protected async _doQuery(): Promise<any> {
 
     try{
 
       const response = await this.post(COMMAND_QUERY_WITH_MD);
 
       this._lastUpdateTimestamp = Date.now();
-  
+
       if(response.status === 200) {
         //this.log.debug(`Daikin - queryDevice('${this._IP}'): Response: '${JSON.stringify(response.data)}'`);
         this._Response = response.data;
         return response.data;
       }
-  
+
       this.log.debug(`Daikin - queryDevice('${this._IP}'): Error: Invalid response status code: '${response.status}'`);
 
     }
     catch(e) {
       this.log.debug(`Daikin - queryDevice('${this._IP}'): Error: '${e}'`);
     }
-  
+
     return undefined;
-  
-  
   }
 
   public async fetchDeviceStatus(bForce:boolean = false): Promise<boolean> {
@@ -531,6 +558,9 @@ export class DaikinDevice {
 
 
 
+const FETCH_ATTEMPTS = 3;
+const FETCH_RETRY_DELAY_MS = 2000;
+
 export class DaikinLocalAPI {
 
   private _devices: DaikinDevice[];
@@ -540,7 +570,7 @@ export class DaikinLocalAPI {
   ) {
 
     this._devices = [];
-    
+
   }
 
   public async fetchDevices(climateIPs:string[], bForce:boolean = false): Promise<DaikinDevice[]> {
@@ -551,13 +581,34 @@ export class DaikinLocalAPI {
     for(const ip of climateIPs) {
       const daikinDevice = new DaikinDevice(ip, this.log);
 
-      if(await daikinDevice.fetchDeviceStatus(bForce)) {
+      if(await this.fetchWithRetry(daikinDevice, bForce)) {
         this._devices.push(daikinDevice);
+      }
+      else {
+        this.log.error(`Daikin: device at ${ip} did not respond after ${FETCH_ATTEMPTS} attempts - skipping.`);
       }
 
     }
 
     return this._devices;
+  }
+
+  // A device that is briefly unreachable at startup (e.g. still booting) would
+  // otherwise be dropped until Homebridge restarts; retry a few times first.
+  private async fetchWithRetry(device: DaikinDevice, bForce: boolean): Promise<boolean> {
+
+    for(let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+
+      if(await device.fetchDeviceStatus(bForce || attempt > 1)) {
+        return true;
+      }
+
+      if(attempt < FETCH_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
+      }
+    }
+
+    return false;
   }
 
 }
