@@ -30,7 +30,7 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
   public readonly daikinLocalAPI: DaikinLocalAPI;
   public readonly log: DaikinPlatformLogger;
 
-  protected readonly DaikinDevices: DaikinDevice[] = [];
+  protected readonly DaikinDevices: Record<string, DaikinDevice> = {};
 
   public platformConfig: DaikinPlatformConfig;
 

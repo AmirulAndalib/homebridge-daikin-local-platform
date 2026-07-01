@@ -27,6 +27,36 @@ const CLIMATE_OPERATE_ON = '00';
 const CLIMATE_OPERATE_OFF = '01';
 const CLIMATE_OPERATE_SETTING = '02';
 
+// Target temperature lives under a mode-dependent `pn` key inside e_1002/e_3001.
+const TARGET_TEMP_PN_BY_MODE: Record<string, string> = {
+  [CLIMATE_MODE_HEATING]: 'p_03',
+  [CLIMATE_MODE_COOLING]: 'p_02',
+  [CLIMATE_MODE_AUTO]: 'p_1D',
+};
+
+// Fan speed lives under a mode-dependent `pn` key inside e_1002/e_3001.
+// Modes not listed here fall back to the cooling key (p_09).
+const FAN_SPEED_PN_BY_MODE: Record<string, string> = {
+  [CLIMATE_MODE_FAN]: 'p_28',
+  [CLIMATE_MODE_DEHUMIDIFY]: 'p_27',
+  [CLIMATE_MODE_AUTO]: 'p_26',
+  [CLIMATE_MODE_HEATING]: 'p_0A',
+  [CLIMATE_MODE_COOLING]: 'p_09',
+};
+const FAN_SPEED_PN_DEFAULT = 'p_09';
+
+// Bidirectional mapping between Daikin fan-speed codes, the HomeKit rotation-speed
+// step (0 = auto ... 6 = level 5) and the human-readable name.
+export const FAN_SPEED_TABLE: { code: string; number: number; name: string }[] = [
+  { code: CLIMATE_FAN_SPEED_AUTO, number: 0, name: 'Auto' },
+  { code: CLIMATE_FAN_SPEED_SLIENT, number: 1, name: 'Silent' },
+  { code: CLIMATE_FAN_SPEED_1, number: 2, name: '1' },
+  { code: CLIMATE_FAN_SPEED_2, number: 3, name: '2' },
+  { code: CLIMATE_FAN_SPEED_3, number: 4, name: '3' },
+  { code: CLIMATE_FAN_SPEED_4, number: 5, name: '4' },
+  { code: CLIMATE_FAN_SPEED_5, number: 6, name: '5' },
+];
+
 const COMMAND_QUERY = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_d?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_f?filter=pv"},{"op":2,"to":"/dsiot/edge.dev_i?filter=pv"},{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status?filter=pv"}]}';
 const COMMAND_QUERY_WITH_MD = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_d?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_f?filter=pv"},{"op":2,"to":"/dsiot/edge.dev_i?filter=pv"},{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status"},{"op":2,"to":"/dsiot/edge/adr_0200.dgc_status"}]}';
 
@@ -53,6 +83,19 @@ export class DaikinDevice {
     this._callback = callback;
   }
 
+  protected async post(data: string): Promise<any> {
+    return http.request({
+      method: 'post',
+      url: `http://${this._IP}${ENDPOINT}`,
+      headers: {
+        'Accept': 'application/json; charset=UTF-8',
+        'Content-Type': 'application/json',
+        'User-Agent': USER_AGENT,
+      },
+      data,
+    });
+  }
+
   public async queryDevice(bForce:boolean = false): Promise<any> {
 
     if(!bForce && (Date.now() - this._lastUpdateTimestamp) < SECONDS_BETWEEN_REQUEST) {
@@ -62,17 +105,8 @@ export class DaikinDevice {
 
     try{
 
-      const response = await http.request({
-        method: 'post',
-        url: `http://${this._IP}${ENDPOINT}`,
-        headers: {
-          'Accept': 'application/json; charset=UTF-8',
-          'Content-Type': 'application/json',
-          'User-Agent': USER_AGENT,
-        },
-        data: COMMAND_QUERY_WITH_MD,
-      });
-  
+      const response = await this.post(COMMAND_QUERY_WITH_MD);
+
       this._lastUpdateTimestamp = Date.now();
   
       if(response.status === 200) {
@@ -127,17 +161,8 @@ export class DaikinDevice {
 
     try{
 
-      const response = await http.request({
-        method: 'post',
-        url: `http://${this._IP}${ENDPOINT}`,
-        headers: {
-          'Accept': 'application/json; charset=UTF-8',
-          'Content-Type': 'application/json',
-          'User-Agent': USER_AGENT,
-        },
-        data: JSON.stringify(command),
-      });
-  
+      const response = await this.post(JSON.stringify(command));
+
       return response.status === 200;
 
     }catch(e) {
@@ -238,19 +263,14 @@ export class DaikinDevice {
 
   public getTargetTemperatureWithMode(mode:string): number {
 
-    if(mode === CLIMATE_MODE_HEATING) {
-      return parseInt(this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/p_03'), 16) / 2.0;
-    }
-    else if(mode === CLIMATE_MODE_COOLING) {
-      return parseInt(this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/p_02'), 16) / 2.0;
-    }
-    else if(mode === CLIMATE_MODE_AUTO) {
-      return parseInt(this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/p_1D'), 16) / 2.0;
+    const pn = TARGET_TEMP_PN_BY_MODE[mode];
+
+    if(!pn) {
+      this.log.debug(`Daikin - getTargetTemperature(): Error: Invalid mode: '${mode}'`);
+      return 0;
     }
 
-    this.log.debug(`Daikin - getTargetTemperature(): Error: Invalid mode: '${mode}'`);
-
-    return 0;
+    return parseInt(this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + pn), 16) / 2.0;
   }
 
   public getTargetTemperature(): number {
@@ -264,18 +284,9 @@ export class DaikinDevice {
   public getTargetTemperatureRange(): number[] {
   
     const mode = this.getOperationMode();
-    let pn = 'p_02';
+    const pn = TARGET_TEMP_PN_BY_MODE[mode];
 
-    if(mode === CLIMATE_MODE_HEATING) {
-      pn = 'p_03';
-    }
-    else if(mode === CLIMATE_MODE_COOLING) {
-      pn = 'p_02';
-    }
-    else if(mode === CLIMATE_MODE_AUTO) {
-      pn = 'p_1D';
-    }
-    else{
+    if(!pn) {
       this.log.debug(`Daikin - getTargetTemperatureRange(): Error: Invalid mode: '${mode}'`);
       return [0, 0];
     }
@@ -314,86 +325,26 @@ export class DaikinDevice {
 
 
   public getFanSpeed(): string {
-  
-    const mode = this.getOperationMode();
-    let pn = 'p_09';
 
-    if(mode === CLIMATE_MODE_FAN) {
-      pn = 'p_28';
-    }
-    else if(mode === CLIMATE_MODE_DEHUMIDIFY) {
-      pn = 'p_27';
-    }
-    else if(mode === CLIMATE_MODE_AUTO) {
-      pn = 'p_26';
-    }
-    else if(mode === CLIMATE_MODE_HEATING) {
-      pn = 'p_0A';
-    }
-    else if(mode === CLIMATE_MODE_COOLING) {
-      pn = 'p_09';
-    }
-    
+    const mode = this.getOperationMode();
+    const pn = FAN_SPEED_PN_BY_MODE[mode] ?? FAN_SPEED_PN_DEFAULT;
+
     return this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + pn);
-  
+
   }
 
   public getFanSpeedName(): string {
 
     const speed = this.getFanSpeed();
 
-    if(speed === CLIMATE_FAN_SPEED_AUTO) {
-      return 'Auto';
-    }
-    else if(speed === CLIMATE_FAN_SPEED_SLIENT) {
-      return 'Silent';
-    }
-    else if(speed === CLIMATE_FAN_SPEED_1) {
-      return '1';
-    }
-    else if(speed === CLIMATE_FAN_SPEED_2) {
-      return '2';
-    }
-    else if(speed === CLIMATE_FAN_SPEED_3) {
-      return '3';
-    }
-    else if(speed === CLIMATE_FAN_SPEED_4) {
-      return '4';
-    }
-    else if(speed === CLIMATE_FAN_SPEED_5) {
-      return '5';
-    }
-
-    return 'Unknown';
+    return FAN_SPEED_TABLE.find(entry => entry.code === speed)?.name ?? 'Unknown';
   }
 
   public getFanSpeedNumber(): number {
+
     const speed = this.getFanSpeed();
 
-    if(speed === CLIMATE_FAN_SPEED_AUTO){
-      return 0;
-    }
-    else if(speed === CLIMATE_FAN_SPEED_SLIENT){
-      return 1;
-    }
-    else if(speed === CLIMATE_FAN_SPEED_1){
-      return 2;
-    }
-    else if(speed === CLIMATE_FAN_SPEED_2){
-      return 3;
-    }
-    else if(speed === CLIMATE_FAN_SPEED_3){
-      return 4;
-    }
-    else if(speed === CLIMATE_FAN_SPEED_4){
-      return 5;
-    }
-    else if(speed === CLIMATE_FAN_SPEED_5){
-      return 6;
-    }
-
-    return 0;
-  
+    return FAN_SPEED_TABLE.find(entry => entry.code === speed)?.number ?? 0;
   }
 
   public getMotionDetection(): boolean {
@@ -409,7 +360,12 @@ export class DaikinDevice {
 
   public async setPowerStatus(power: boolean): Promise<boolean> {
 
-    const command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": CLIMATE_OPERATE_SETTING }]}, {"pn": "e_A002","pch": [{"pn": "p_01", "pv": power ? '01':'00'}]}];
+    // p_2D is the operation-type flag. Sending SETTING ('02') makes the unit treat the
+    // stop as a mere config change, so it skips the post-stop 内部クリーン (mould-proof) dry
+    // cycle. Sending the genuine OFF ('01') makes it a normal user stop, which triggers the
+    // dry cycle when the unit's auto-internal-clean setting is enabled — matching the remote.
+    const operate = power ? CLIMATE_OPERATE_ON : CLIMATE_OPERATE_OFF;
+    const command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": operate }]}, {"pn": "e_A002","pch": [{"pn": "p_01", "pv": power ? '01':'00'}]}];
     return await this.sendCommand(command);
 
   }
@@ -424,25 +380,16 @@ export class DaikinDevice {
   public async setTargetTemperature(temperature: number): Promise<boolean> {
 
     const mode = this.getOperationMode();
-    
-    let pn = 'p_02';
-    const pv = (temperature * 2).toString(16);
 
-    if(mode === CLIMATE_MODE_HEATING) {
-      pn = 'p_03';
+    const pn = TARGET_TEMP_PN_BY_MODE[mode];
 
-    }
-    else if(mode === CLIMATE_MODE_COOLING) {
-      pn = 'p_02';
-    }
-    else if(mode === CLIMATE_MODE_AUTO) {
-      pn = 'p_1D';
-    }
-    else{
+    if(!pn) {
       return false;
     }
 
-    let command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": CLIMATE_OPERATE_SETTING}]}, {"pn": "e_3001","pch": [{"pn": pn, "pv": pv}]}];
+    const pv = (temperature * 2).toString(16);
+
+    const command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": CLIMATE_OPERATE_SETTING}]}, {"pn": "e_3001","pch": [{"pn": pn, "pv": pv}]}];
 
     if(mode === CLIMATE_MODE_COOLING) {
       this.pushObject(command, 'e_3001', {"pn": "p_0B", "pv": '0A'});
@@ -458,23 +405,7 @@ export class DaikinDevice {
 
     const mode = this.getOperationMode();
 
-    let pn = 'p_09';
-  
-    if(mode === CLIMATE_MODE_FAN) {
-      pn = 'p_28';
-    }
-    else if(mode === CLIMATE_MODE_DEHUMIDIFY) {
-      pn = 'p_27';
-    }
-    else if(mode === CLIMATE_MODE_AUTO) {
-      pn = 'p_26';
-    }
-    else if(mode === CLIMATE_MODE_HEATING) {
-      pn = 'p_0A';
-    }
-    else if(mode === CLIMATE_MODE_COOLING) {
-      pn = 'p_09';
-    }
+    const pn = FAN_SPEED_PN_BY_MODE[mode] ?? FAN_SPEED_PN_DEFAULT;
 
     const command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": CLIMATE_OPERATE_SETTING}]}, {"pn": "e_3001","pch": [{"pn": pn, "pv": speed}]}];
     return await this.sendCommand(command);
@@ -482,62 +413,9 @@ export class DaikinDevice {
 
   public extractValue(responsesData: object, fr: string, path: string): any | undefined {
 
-    try {
+    const element = this.extractObject(responsesData, fr, path);
 
-      if(responsesData === undefined || responsesData.hasOwnProperty('responses') === false) {
-        this.log.debug(`Daikin - extractValue(${Object}, ${fr}, ${path}): Error: No responses object found`);
-        return undefined;
-      }
-
-
-
-      let currentObject = responsesData['responses'];
-  
-      for(const response of currentObject) {
-        if (response['fr'] === fr) {
-          currentObject = response['pc']['pch'];
-        }
-      }
-
-      const pathKeys = path.split('/');
-
-      for (let i = 0; i < pathKeys.length; i++) {
-        try{
-
-          const key = pathKeys[i];
-          
-          for(const currentObjectElement of currentObject) {
-            if ((currentObjectElement['pn'] === key && currentObjectElement.hasOwnProperty('pch'))) {
-              currentObject = currentObjectElement['pch'];
-              break;
-            }
-            else if (currentObjectElement['pn'] === key && currentObjectElement.hasOwnProperty('pv')) {
-              
-              if(i === pathKeys.length - 1) {
-                return currentObjectElement['pv'];
-              }
-            }
-
-  
-          }
-  
-  
-        } catch (e) {
-          this.log.debug('Daikin - extractValue(): Error:' + e);
-        }
-  
-  
-  
-      }
-    }
-    catch (e) {
-      this.log.debug('Daikin - extractValue(): Error:' + e);
-    }
-
-
-    this.log.debug('Daikin - extractValue(): Error: No value found for path:' + path);
-  
-    return undefined;
+    return element ? element['pv'] : undefined;
   }
 
   public extractObject(responsesData: object, fr: string, path: string): object | undefined {
@@ -622,21 +500,12 @@ export class DaikinDevice {
   protected async sendCommand(command: object): Promise<boolean> {
 
     const param = {"requests": [{"op": 3,"to": "/dsiot/edge/adr_0100.dgc_status","pc": {"pn": "dgc_status","pch": [{"pn": "e_1002","pch": command}]}}]};
-    
+
     try{
 
-      const response = await http.request({
-        method: 'post',
-        url: `http://${this._IP}${ENDPOINT}`,
-        headers: {
-          'Accept': 'application/json; charset=UTF-8',
-          'Content-Type': 'application/json',
-          'User-Agent': USER_AGENT,
-        },
-        data: JSON.stringify(param),
-      });
-  
-  
+      const response = await this.post(JSON.stringify(param));
+
+
       if(response.status === 200) {
         this.log.debug(`Daikin - sendCommand('${this._IP}'):  '${JSON.stringify(param)} ' : Response: '${JSON.stringify(response.data)}'`);
       }

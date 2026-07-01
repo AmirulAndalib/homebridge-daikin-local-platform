@@ -9,13 +9,7 @@ import {
   CLIMATE_MODE_HUMIDIFY,
   CLIMATE_MODE_FAN,
   CLIMATE_MODE_HEATING,
-  CLIMATE_FAN_SPEED_AUTO,
-  CLIMATE_FAN_SPEED_SLIENT,
-  CLIMATE_FAN_SPEED_1,
-  CLIMATE_FAN_SPEED_2,
-  CLIMATE_FAN_SPEED_3,
-  CLIMATE_FAN_SPEED_4,
-  CLIMATE_FAN_SPEED_5
+  FAN_SPEED_TABLE
 } from '../daikin-local';
 import {DaikinLocalAPI, DaikinDevice} from '../daikin-local';
 
@@ -25,7 +19,7 @@ import {DaikinLocalAPI, DaikinDevice} from '../daikin-local';
  * Each accessory may expose multiple services of different service types.
  */
 export default class ClimateAccessory {
-  private services: Service[] = [];
+  private services: Record<string, Service> = {};
   private _refreshInterval: NodeJS.Timer | undefined;
   private _lastFanSpeed = 1; // slient
 
@@ -92,8 +86,8 @@ export default class ClimateAccessory {
     this.services['Climate']
     .getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
     .setProps({
-      minValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[0] || '10',
-      maxValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[1] || '30',
+      minValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[0] || 10,
+      maxValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[1] || 30,
       minStep: 0.5,
     })
     .onSet(this.setCoolingThresholdTemperature.bind(this))
@@ -103,8 +97,8 @@ export default class ClimateAccessory {
   this.services['Climate']
     .getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
     .setProps({
-      minValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[0] || '10',
-      maxValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[1] || '30',
+      minValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[0] || 10,
+      maxValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[1] || 30,
       minStep: 0.5,
     })
     .onSet(this.setHeatingThresholdTemperature.bind(this))
@@ -239,48 +233,22 @@ export default class ClimateAccessory {
 
     this.platform.log.debug(`Accessory: setRotationSpeed() for device '${this.accessory.displayName}'`);
 
-    let speed = CLIMATE_FAN_SPEED_AUTO;
+    const entry = FAN_SPEED_TABLE.find(e => e.number === value);
 
-    switch (value) {
-      case 0:
-        const lastFanSpeed = this.accessory.context.device.getFanSpeedNumber();
-        if (lastFanSpeed !== 0) {
-          this._lastFanSpeed = lastFanSpeed;
-        }
-        speed = CLIMATE_FAN_SPEED_AUTO;
-        break;
-
-      case 1:
-        speed = CLIMATE_FAN_SPEED_SLIENT;
-        break;
-
-      case 2:
-        speed = CLIMATE_FAN_SPEED_1;
-        break;
-
-      case 3:
-        speed = CLIMATE_FAN_SPEED_2;
-        break;
-
-      case 4:
-        speed = CLIMATE_FAN_SPEED_3;
-        break;
-
-      case 5:
-        speed = CLIMATE_FAN_SPEED_4;
-        break;
-      
-      case 6:
-        speed = CLIMATE_FAN_SPEED_5;
-        break;
-
-
-      default:
-        this.platform.log.error(`Unknown RotationSpeed: ${value}` );
-        return;
+    if (!entry) {
+      this.platform.log.error(`Unknown RotationSpeed: ${value}` );
+      return;
     }
 
-    this.accessory.context.device.setFanSpeed(speed);
+    // Speed 0 = auto; remember the last explicit speed so turning the fan back on restores it.
+    if (value === 0) {
+      const lastFanSpeed = this.accessory.context.device.getFanSpeedNumber();
+      if (lastFanSpeed !== 0) {
+        this._lastFanSpeed = lastFanSpeed;
+      }
+    }
+
+    this.accessory.context.device.setFanSpeed(entry.code);
   }
   
   async getCurrentRelativeHumidity():Promise<CharacteristicValue> {
@@ -395,17 +363,6 @@ export default class ClimateAccessory {
               );
               break;
 
-            // Humidifier
-            case CLIMATE_MODE_HUMIDIFY:
-              this.services['Climate'].getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
-                .updateValue(this.platform.Characteristic.CurrentHeaterCoolerState.IDLE);
-                this.services['Climate'].updateCharacteristic(
-                this.platform.Characteristic.TargetHeaterCoolerState,
-
-                this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
-              );
-              break;
-
             // Fan
             case CLIMATE_MODE_FAN:
               this.services['Climate'].getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
@@ -422,7 +379,8 @@ export default class ClimateAccessory {
                 `Unknown TargetHeaterCoolerState state: '${this.accessory.displayName}' '${currentMode}'`);
               break;
           }
-          return this.services['Climate'].getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState).value ;
+          return this.services['Climate'].getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState).value
+            ?? this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
 
     }
 
@@ -494,21 +452,6 @@ export default class ClimateAccessory {
 
 
     this.accessory.context.device.setOperationMode(mode);
-  }
-
-  async getMotionDetection():Promise<CharacteristicValue> {
-        
-      this.platform.log.debug(`Accessory: getMotionDetection() for device '${this.accessory.displayName}'`);
-  
-      return this.accessory.context.device.getMotionDetection();
-  }
-
-  async setMotionDetection(value: CharacteristicValue) {
-
-    this.platform.log.debug(`Accessory: setMotionDetection() for device '${this.accessory.displayName}'`);
-
-    this.accessory.context.device.setMotionDetection(value ? true : false);
-    this.services['MotionSensor'].updateCharacteristic(this.platform.Characteristic.On, value);  
   }
 
   async updateDeviceStatus(device: DaikinDevice) {
