@@ -45,7 +45,7 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
   constructor(
     homebridgeLogger: Logger,
     config: PlatformConfig,
-    private readonly api: API,
+    public readonly api: API,
   ) {
     this.platformConfig = config as DaikinPlatformConfig;
 
