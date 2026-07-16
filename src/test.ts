@@ -27,7 +27,7 @@ daikinLocalAPI.fetchDevices(["10.1.10.120", "10.1.10.121", "10.1.10.122", "10.1.
 
   for(let i = 0; i < devices.length; i++) {
     logger.info(`Name: '${devices[i].getDeviceName()}' Temp: '${devices[i].getIndoorTemperature()}' Humidity: '${devices[i].getIndoorHumidity()}' Target Temp: '${devices[i].getTargetTemperature()}'  Mode: '${devices[i].getOperationModeName()}' FanSpeed: '${devices[i].getFanSpeedName()}'`);
-    logger.info(`Model: ${ devices[i].getDeviceType()} SSID: ${devices[i].getSSID()}`);
+    logger.info(`Model: ${ devices[i].getDeviceType()} SSID: ${devices[i].getSSID()} Supported Modes: ${devices[i].getSupportedOperationModeNames().join(', ')}`);
     devices[i].setShowSSID(false);
     devices[i].setCallback(updateDeviceStatus);
   }

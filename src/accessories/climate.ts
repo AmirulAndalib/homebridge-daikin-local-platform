@@ -22,6 +22,12 @@ export default class ClimateAccessory {
   private services: Record<string, Service> = {};
   private _refreshInterval: NodeJS.Timer | undefined;
   private _lastFanSpeed = 1; // slient
+  // Capabilities detected from the device's mode metadata (see
+  // DaikinDevice.supportsOperationMode); decide which HeaterCooler states
+  // and threshold characteristics this accessory exposes.
+  private _supportsAuto = true;
+  private _supportsHeat = true;
+  private _supportsCool = true;
 
   constructor(
     private readonly platform: DaikinPlatform,
@@ -78,31 +84,75 @@ export default class ClimateAccessory {
       .getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
       .onGet(this.getCurrentHeaterCoolerState.bind(this));
 
+    this._supportsAuto = accessory.context.device?.supportsOperationMode(CLIMATE_MODE_AUTO) ?? true;
+    this._supportsHeat = accessory.context.device?.supportsOperationMode(CLIMATE_MODE_HEATING) ?? true;
+    this._supportsCool = accessory.context.device?.supportsOperationMode(CLIMATE_MODE_COOLING) ?? true;
+
+    const validTargetStates: number[] = [];
+    if (this._supportsAuto) {
+      validTargetStates.push(this.platform.Characteristic.TargetHeaterCoolerState.AUTO);
+    }
+    if (this._supportsHeat) {
+      validTargetStates.push(this.platform.Characteristic.TargetHeaterCoolerState.HEAT);
+    }
+    if (this._supportsCool) {
+      validTargetStates.push(this.platform.Characteristic.TargetHeaterCoolerState.COOL);
+    }
+
+    // A unit reporting none of the three states would leave HomeKit with an
+    // empty mode menu; fall back to exposing everything.
+    if (validTargetStates.length === 0) {
+      this._supportsAuto = this._supportsHeat = this._supportsCool = true;
+      validTargetStates.push(
+        this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
+        this.platform.Characteristic.TargetHeaterCoolerState.HEAT,
+        this.platform.Characteristic.TargetHeaterCoolerState.COOL,
+      );
+    }
+
+    this.platform.log.info(`Accessory: '${this.accessory.displayName}' supported modes: `
+      + `${accessory.context.device?.getSupportedOperationModeNames().join(', ')}`);
+
     this.services['Climate']
       .getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
+      .setProps({
+        validValues: validTargetStates,
+      })
       .onSet(this.setTargetHeaterCoolerState.bind(this));
 
     // Cooling Threshold Temperature (optional)
-    this.services['Climate']
-    .getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
-    .setProps({
-      minValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[0] || 10,
-      maxValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[1] || 30,
-      minStep: 0.5,
-    })
-    .onSet(this.setCoolingThresholdTemperature.bind(this))
-    .onGet(this.getCoolingThresholdTemperature.bind(this));
+    if (this._supportsCool) {
+      this.services['Climate']
+        .getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
+        .setProps({
+          minValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[0] || 10,
+          maxValue: accessory.context.device?.getCoolingThresholdTemperatureRange()[1] || 30,
+          minStep: 0.5,
+        })
+        .onSet(this.setCoolingThresholdTemperature.bind(this))
+        .onGet(this.getCoolingThresholdTemperature.bind(this));
+    } else if (this.services['Climate'].testCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)) {
+      // Drop the characteristic left on an accessory cached before capability detection.
+      this.services['Climate'].removeCharacteristic(
+        this.services['Climate'].getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature));
+    }
 
-  // Heating Threshold Temperature (optional)
-  this.services['Climate']
-    .getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
-    .setProps({
-      minValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[0] || 10,
-      maxValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[1] || 30,
-      minStep: 0.5,
-    })
-    .onSet(this.setHeatingThresholdTemperature.bind(this))
-    .onGet(this.getHeatingThresholdTemperature.bind(this));
+    // Heating Threshold Temperature (optional)
+    if (this._supportsHeat) {
+      this.services['Climate']
+        .getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
+        .setProps({
+          minValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[0] || 10,
+          maxValue: accessory.context.device?.getHeatingThresholdTemperatureRange()[1] || 30,
+          minStep: 0.5,
+        })
+        .onSet(this.setHeatingThresholdTemperature.bind(this))
+        .onGet(this.getHeatingThresholdTemperature.bind(this));
+    } else if (this.services['Climate'].testCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)) {
+      // Drop the characteristic left on an accessory cached before capability detection.
+      this.services['Climate'].removeCharacteristic(
+        this.services['Climate'].getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature));
+    }
 
     // Fan control service
     this.services['Fan'] = this.accessory.getService(this.platform.Service.Fan)
@@ -183,6 +233,19 @@ export default class ClimateAccessory {
     }
   }
 
+
+  // TargetHeaterCoolerState shown while the unit runs an auxiliary mode
+  // (fan/dry/humidify) that HeaterCooler cannot represent; must be one of
+  // the states this accessory actually exposes in validValues.
+  private auxModeTargetState(): CharacteristicValue {
+    if (this._supportsAuto) {
+      return this.platform.Characteristic.TargetHeaterCoolerState.AUTO;
+    }
+    if (this._supportsCool) {
+      return this.platform.Characteristic.TargetHeaterCoolerState.COOL;
+    }
+    return this.platform.Characteristic.TargetHeaterCoolerState.HEAT;
+  }
 
   // Turn a device command result into a HomeKit-visible outcome: a failed command
   // must reject the onSet so the Home app doesn't show a stale "success" state.
@@ -355,10 +418,10 @@ export default class ClimateAccessory {
                 this.services['Climate'].updateCharacteristic(
                 this.platform.Characteristic.TargetHeaterCoolerState,
 
-                this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
+                this.auxModeTargetState(),
               );
               break;
-              
+
             // Humidifier
             case CLIMATE_MODE_HUMIDIFY:
               this.services['Climate'].getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
@@ -366,7 +429,7 @@ export default class ClimateAccessory {
                 this.services['Climate'].updateCharacteristic(
                 this.platform.Characteristic.TargetHeaterCoolerState,
 
-                this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
+                this.auxModeTargetState(),
               );
               break;
 
@@ -377,7 +440,7 @@ export default class ClimateAccessory {
                 this.services['Climate'].updateCharacteristic(
                 this.platform.Characteristic.TargetHeaterCoolerState,
 
-                this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
+                this.auxModeTargetState(),
               );
               break;
 
@@ -474,8 +537,14 @@ export default class ClimateAccessory {
       this.getCurrentHeaterCoolerState();
 
   
-      this.services['Climate'].updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.accessory.context.device.getTargetTemperatureWithMode(CLIMATE_MODE_HEATING));
-      this.services['Climate'].updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.accessory.context.device.getTargetTemperatureWithMode(CLIMATE_MODE_COOLING));
+      // updateCharacteristic would re-add a removed optional characteristic,
+      // so only push values for modes this accessory exposes.
+      if (this._supportsHeat) {
+        this.services['Climate'].updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.accessory.context.device.getTargetTemperatureWithMode(CLIMATE_MODE_HEATING));
+      }
+      if (this._supportsCool) {
+        this.services['Climate'].updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.accessory.context.device.getTargetTemperatureWithMode(CLIMATE_MODE_COOLING));
+      }
   
       this.services['HumiditySensor'].updateCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity, this.accessory.context.device.getIndoorHumidity());
 

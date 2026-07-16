@@ -28,6 +28,15 @@ const CLIMATE_OPERATE_ON = '00';
 const CLIMATE_OPERATE_OFF = '01';
 const CLIMATE_OPERATE_SETTING = '02';
 
+const MODE_NAME_BY_CODE: Record<string, string> = {
+  [CLIMATE_MODE_FAN]: 'Fan',
+  [CLIMATE_MODE_HEATING]: 'Heating',
+  [CLIMATE_MODE_COOLING]: 'Cooling',
+  [CLIMATE_MODE_AUTO]: 'Auto',
+  [CLIMATE_MODE_DEHUMIDIFY]: 'Dehumidify',
+  [CLIMATE_MODE_HUMIDIFY]: 'Humidify',
+};
+
 // Target temperature lives under a mode-dependent `pn` key inside e_1002/e_3001.
 const TARGET_TEMP_PN_BY_MODE: Record<string, string> = {
   [CLIMATE_MODE_HEATING]: 'p_03',
@@ -265,27 +274,42 @@ export class DaikinDevice {
   }
 
   public getOperationModeName(): string {
-      
-      const mode = this.getOperationMode();
-  
-      if(mode === CLIMATE_MODE_FAN) {
-        return 'Fan';
-      }
-      else if(mode === CLIMATE_MODE_DEHUMIDIFY) {
-        return 'Dehumidify';
-      }
-      else if(mode === CLIMATE_MODE_AUTO) {
-        return 'Auto';
-      }
-      else if(mode === CLIMATE_MODE_HEATING) {
-        return 'Heating';
-      }
-      else if(mode === CLIMATE_MODE_COOLING) {
-        return 'Cooling';
-      }
-  
-      return 'Unknown';
-  
+
+    return MODE_NAME_BY_CODE[this.getOperationMode()] ?? 'Unknown';
+
+  }
+
+  // The mode property's metadata `mx` is a little-endian bitmask of the mode
+  // codes the unit accepts: bit n set = mode code n supported. Example: a
+  // heat-pump unit reports '2F00' (0x002F -> bits 0,1,2,3,5) = fan, heating,
+  // cooling, auto and dehumidify; a cool-only unit reports the heating bit
+  // cleared. Devices without the metadata are treated as supporting every
+  // mode, which matches the behaviour before capability detection existed.
+  public supportsOperationMode(mode: string): boolean {
+
+    const element = this.extractObject(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/p_01');
+    const md = element ? element['md'] : undefined;
+    const mx = md ? md['mx'] : undefined;
+
+    if(typeof mx !== 'string' || mx.length !== 4) {
+      return true;
+    }
+
+    const mask = parseInt(mx.substring(2, 4) + mx.substring(0, 2), 16);
+    const bit = parseInt(mode.substring(2, 4) + mode.substring(0, 2), 16);
+
+    if(Number.isNaN(mask) || Number.isNaN(bit)) {
+      return true;
+    }
+
+    return (mask & (1 << bit)) !== 0;
+  }
+
+  public getSupportedOperationModeNames(): string[] {
+
+    return Object.keys(MODE_NAME_BY_CODE)
+      .filter(mode => this.supportsOperationMode(mode))
+      .map(mode => MODE_NAME_BY_CODE[mode]);
   }
 
   public getTargetTemperatureWithMode(mode:string): number {
