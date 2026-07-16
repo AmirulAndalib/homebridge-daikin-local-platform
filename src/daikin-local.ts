@@ -1,41 +1,32 @@
 import DaikinPlatformLogger from './logger';
-import axios from 'axios';
-import rateLimit from 'axios-rate-limit';
 
 import {
   USER_AGENT,
   ENDPOINT,
-  MIN_REQUEST_INTERVAL_MS,
   REQUEST_TIMEOUT_MS
 } from './const';
 
-export const CLIMATE_MODE_FAN = '0000';
-export const CLIMATE_MODE_HEATING = '0100';
-export const CLIMATE_MODE_COOLING = '0200';
-export const CLIMATE_MODE_AUTO = '0300';
-export const CLIMATE_MODE_DEHUMIDIFY = '0500';
-export const CLIMATE_MODE_HUMIDIFY = '0800';
+import {
+  DaikinDevice,
+  CLIMATE_MODE_FAN,
+  CLIMATE_MODE_HEATING,
+  CLIMATE_MODE_COOLING,
+  CLIMATE_MODE_AUTO,
+  CLIMATE_MODE_DEHUMIDIFY,
+} from './daikin-device';
 
-export const CLIMATE_FAN_SPEED_AUTO = '0A00';
-export const CLIMATE_FAN_SPEED_SLIENT = '0B00';
-export const CLIMATE_FAN_SPEED_1 = '0300';
-export const CLIMATE_FAN_SPEED_2 = '0400';
-export const CLIMATE_FAN_SPEED_3 = '0500';
-export const CLIMATE_FAN_SPEED_4 = '0600';
-export const CLIMATE_FAN_SPEED_5 = '0700';
+import { DaikinBRP069Device } from './daikin-brp069';
+import { DaikinAirBaseDevice } from './daikin-airbase';
+
+// Shared device-facing API surface (base class, mode/fan-speed codes, tables)
+// stays importable from this module so existing imports keep working.
+export * from './daikin-device';
+export { DaikinBRP069Device } from './daikin-brp069';
+export { DaikinAirBaseDevice } from './daikin-airbase';
 
 const CLIMATE_OPERATE_ON = '00';
 const CLIMATE_OPERATE_OFF = '01';
 const CLIMATE_OPERATE_SETTING = '02';
-
-const MODE_NAME_BY_CODE: Record<string, string> = {
-  [CLIMATE_MODE_FAN]: 'Fan',
-  [CLIMATE_MODE_HEATING]: 'Heating',
-  [CLIMATE_MODE_COOLING]: 'Cooling',
-  [CLIMATE_MODE_AUTO]: 'Auto',
-  [CLIMATE_MODE_DEHUMIDIFY]: 'Dehumidify',
-  [CLIMATE_MODE_HUMIDIFY]: 'Humidify',
-};
 
 // Target temperature lives under a mode-dependent `pn` key inside e_1002/e_3001.
 const TARGET_TEMP_PN_BY_MODE: Record<string, string> = {
@@ -55,48 +46,20 @@ const FAN_SPEED_PN_BY_MODE: Record<string, string> = {
 };
 const FAN_SPEED_PN_DEFAULT = 'p_09';
 
-// Bidirectional mapping between Daikin fan-speed codes, the HomeKit rotation-speed
-// step (0 = auto ... 6 = level 5) and the human-readable name.
-export const FAN_SPEED_TABLE: { code: string; number: number; name: string }[] = [
-  { code: CLIMATE_FAN_SPEED_AUTO, number: 0, name: 'Auto' },
-  { code: CLIMATE_FAN_SPEED_SLIENT, number: 1, name: 'Silent' },
-  { code: CLIMATE_FAN_SPEED_1, number: 2, name: '1' },
-  { code: CLIMATE_FAN_SPEED_2, number: 3, name: '2' },
-  { code: CLIMATE_FAN_SPEED_3, number: 4, name: '3' },
-  { code: CLIMATE_FAN_SPEED_4, number: 5, name: '4' },
-  { code: CLIMATE_FAN_SPEED_5, number: 6, name: '5' },
-];
-
+const COMMAND_PROBE = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"}]}';
 const COMMAND_QUERY = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_d?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_f?filter=pv"},{"op":2,"to":"/dsiot/edge.dev_i?filter=pv"},{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status?filter=pv"}]}';
 const COMMAND_QUERY_WITH_MD = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_d?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_f?filter=pv"},{"op":2,"to":"/dsiot/edge.dev_i?filter=pv"},{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status"},{"op":2,"to":"/dsiot/edge/adr_0200.dgc_status"}]}';
 
-const http = rateLimit(axios.create(), { maxRequests: 1, perMilliseconds: 500 });
+// Devices running the newer JSON protocol (`/dsiot/multireq`), i.e. firmware 2.8.0+
+// adapters — what pydaikin calls BRP084.
+export class DaikinDsiotDevice extends DaikinDevice {
 
-export class DaikinDevice {
-
-  protected _IP: string;
-  protected _Response: object;
-  protected _log: DaikinPlatformLogger;
-  protected _lastUpdateTimestamp: number = 0;
-  protected _callback: ((device: DaikinDevice) => void) | null = null;
-  // Shared promise for an in-flight query so concurrent reads don't each hit the unit.
-  protected _inflightQuery: Promise<any> | null = null;
-
-  constructor(
-    public readonly IP: string,
-    private readonly log: DaikinPlatformLogger,
-  ) {
-    this._IP = IP;
-    this._Response = {};
-    this._log = log;
-  }
-
-  public setCallback(callback: (device: DaikinDevice) => void) {
-    this._callback = callback;
+  public getProtocolName(): string {
+    return 'dsiot';
   }
 
   protected async post(data: string): Promise<any> {
-    return http.request({
+    return this.request({
       method: 'post',
       url: `http://${this._IP}${ENDPOINT}`,
       headers: {
@@ -109,34 +72,19 @@ export class DaikinDevice {
     });
   }
 
-  public async queryDevice(bForce:boolean = false): Promise<any> {
-
-    if(!bForce) {
-      if((Date.now() - this._lastUpdateTimestamp) < MIN_REQUEST_INTERVAL_MS) {
-        this.log.debug(`Daikin - queryDevice('${this._IP}'): Skipping query as last update was less than ${MIN_REQUEST_INTERVAL_MS} ms ago`);
-        return this._Response;
-      }
-
-      // Coalesce concurrent (non-forced) reads onto a single request.
-      if(this._inflightQuery) {
-        return this._inflightQuery;
-      }
-    }
-
-    const request = this._doQuery();
-
-    if(!bForce) {
-      this._inflightQuery = request;
-    }
+  // Lightweight protocol check used during discovery; quiet on failure so
+  // probing the wrong protocol doesn't spam the log.
+  public async probe(): Promise<boolean> {
 
     try {
-      return await request;
+      const response = await this.post(COMMAND_PROBE);
+      return response.status === 200 && response.data && response.data['responses'] !== undefined;
     }
-    finally {
-      if(this._inflightQuery === request) {
-        this._inflightQuery = null;
-      }
+    catch(e) {
+      this.log.debug(`Daikin - probe('${this._IP}'): not a dsiot device: '${e}'`);
     }
+
+    return false;
   }
 
   protected async _doQuery(): Promise<any> {
@@ -163,34 +111,8 @@ export class DaikinDevice {
     return undefined;
   }
 
-  public async fetchDeviceStatus(bForce:boolean = false): Promise<boolean> {
-
-    const response = await this.queryDevice(bForce);
-
-    if(response === undefined) {
-      this.log.error(`Daikin - fetchDeviceStatus(${bForce}): Error: No response from device`);
-      return false;
-    }
-
-
-    if(!this.getMacAddress()){
-      this.log.error(`Daikin - fetchDeviceStatus(${bForce}): Error: ${this._IP} no MAC address found`);
-      this.log.debug(`Daikin - fetchDeviceStatus(${bForce}): Response: '${this._Response}'`);
-      return false;
-    }
-
-    
-    this.log.debug(`Daikin - fetchDeviceStatus(${bForce}): Name: ${this.getDeviceName()} MAC:${this.getMacAddress()} Power:${this.getPowerStatus()} Temp:${this.getIndoorTemperature()} Humidity:${this.getIndoorHumidity()} Target Temp:${this.getTargetTemperature()}'  Mode:${this.getOperationModeName()} FanSpeed:${this.getFanSpeedName()} `);
-
-    if(this._callback) {
-      this._callback(this);
-    }
-    
-    return true;  
-  }
-
   public async setShowSSID(bShow: boolean): Promise<boolean> {
-     
+
 
     this.log.debug(`Daikin - setShowSSID(${bShow}): Name: ${this.getDeviceName()}`);
     const command = {"requests":[{"op":3,"to":"/dsiot/edge.adp_d","pc":{"pn":"adp_d","pch":[{"pn":"disp_ssid","pv": bShow ? 0 :1 }]}}]};
@@ -232,14 +154,9 @@ export class DaikinDevice {
   public getFirmwareVersion(): string {
     return this.extractValue(this._Response, '/dsiot/edge.adp_i', 'ver');
   }
-  
-
-  public getDeviceIP(): string {
-    return this._IP;  
-  }
 
   public getPowerStatus(): boolean {
-    return this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_A002/p_01') === '01'; 
+    return this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_A002/p_01') === '01';
   }
 
   public getIndoorTemperature(): number {
@@ -273,12 +190,6 @@ export class DaikinDevice {
 
   }
 
-  public getOperationModeName(): string {
-
-    return MODE_NAME_BY_CODE[this.getOperationMode()] ?? 'Unknown';
-
-  }
-
   // The mode property's metadata `mx` is a little-endian bitmask of the mode
   // codes the unit accepts: bit n set = mode code n supported. Example: a
   // heat-pump unit reports '2F00' (0x002F -> bits 0,1,2,3,5) = fan, heating,
@@ -305,13 +216,6 @@ export class DaikinDevice {
     return (mask & (1 << bit)) !== 0;
   }
 
-  public getSupportedOperationModeNames(): string[] {
-
-    return Object.keys(MODE_NAME_BY_CODE)
-      .filter(mode => this.supportsOperationMode(mode))
-      .map(mode => MODE_NAME_BY_CODE[mode]);
-  }
-
   public getTargetTemperatureWithMode(mode:string): number {
 
     const pn = TARGET_TEMP_PN_BY_MODE[mode];
@@ -324,16 +228,8 @@ export class DaikinDevice {
     return parseInt(this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + pn), 16) / 2.0;
   }
 
-  public getTargetTemperature(): number {
-
-    const mode = this.getOperationMode();
-
-    return this.getTargetTemperatureWithMode(mode);
-
-  }
-
   public getTargetTemperatureRange(): number[] {
-  
+
     const mode = this.getOperationMode();
     const pn = TARGET_TEMP_PN_BY_MODE[mode];
 
@@ -349,29 +245,29 @@ export class DaikinDevice {
 
     return [min, max];
 
-  
+
   }
 
   public getCoolingThresholdTemperatureRange(): number[] {
-  
+
     const md = this.extractObject(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/p_02');
 
     const min = md ? parseInt(md['md']['mi'], 16) / 2.0 : 0;
     const max = md ? parseInt(md['md']['mx'], 16) / 2.0 : 0;
 
     return [min, max];
-  
+
   }
 
   public getHeatingThresholdTemperatureRange(): number[] {
-  
+
     const md = this.extractObject(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/p_03');
 
     const min = md ? parseInt(md['md']['mi'], 16) / 2.0 : 0;
     const max = md ? parseInt(md['md']['mx'], 16) / 2.0 : 0;
 
     return [min, max];
-  
+
   }
 
 
@@ -384,29 +280,15 @@ export class DaikinDevice {
 
   }
 
-  public getFanSpeedName(): string {
-
-    const speed = this.getFanSpeed();
-
-    return FAN_SPEED_TABLE.find(entry => entry.code === speed)?.name ?? 'Unknown';
-  }
-
-  public getFanSpeedNumber(): number {
-
-    const speed = this.getFanSpeed();
-
-    return FAN_SPEED_TABLE.find(entry => entry.code === speed)?.number ?? 0;
-  }
-
   public getMotionDetection(): boolean {
-    return this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3003/p_27') === '01'; 
+    return this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3003/p_27') === '01';
   }
 
   public async setMotionDetection(bEnable: boolean): Promise<boolean> {
-      
+
       const command = [{"pn": "e_3003", "pch": [{"pn": "p_27", "pv": bEnable ? '01':'00'}]}];
       return await this.sendCommand(command);
-  
+
   }
 
   public async setPowerStatus(power: boolean): Promise<boolean> {
@@ -444,10 +326,10 @@ export class DaikinDevice {
 
     if(mode === CLIMATE_MODE_COOLING) {
       this.pushObject(command, 'e_3001', {"pn": "p_0B", "pv": '0A'});
-      this.pushObject(command, 'e_3001', {"pn": "p_0C", "pv": '01'});    
-    
+      this.pushObject(command, 'e_3001', {"pn": "p_0C", "pv": '01'});
+
     }
-    
+
     return await this.sendCommand(command);
 
   }
@@ -472,27 +354,27 @@ export class DaikinDevice {
   public extractObject(responsesData: object, fr: string, path: string): object | undefined {
 
     try {
-  
+
       if(responsesData === undefined || responsesData.hasOwnProperty('responses') === false) {
         this.log.debug('Daikin - extractObject(): Error: No responses object found');
         return undefined;
       }
-  
-  
-  
+
+
+
       let currentObject = responsesData['responses'];
-  
+
       for(const response of currentObject) {
         if (response['fr'] === fr) {
           currentObject = response['pc']['pch'];
         }
       }
-  
+
       const pathKeys = path.split('/');
-  
+
       for (const key of pathKeys) {
         try{
-          
+
           for(const currentObjectElement of currentObject) {
             if (currentObjectElement['pn'] === key && currentObjectElement.hasOwnProperty('pch')) {
               currentObject = currentObjectElement['pch'];
@@ -501,34 +383,34 @@ export class DaikinDevice {
             else if (currentObjectElement['pn'] === key && currentObjectElement.hasOwnProperty('pv')) {
               return currentObjectElement;
             }
-  
+
           }
-  
-  
+
+
         } catch (e) {
           this.log.debug('Daikin - extractValue(): Error:' + e);
         }
-  
-  
-  
+
+
+
       }
     }
     catch (e) {
       this.log.debug('Daikin - extractValue(): Error:' + e);
     }
-  
-  
+
+
     this.log.debug('Daikin - extractValue(): Error: No value found for path:' + path);
-  
+
     return undefined;
   }
 
   // const command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": CLIMATE_OPERATE_SETTING}]}, {"pn": "e_3001","pch": [{"pn": pn, "pv": speed}]}];
 
   public pushObject(jsonData: Object, pn: string, obj: object): object | undefined {
-  
+
     try{
- 
+
       for(const i in jsonData) {
         const currentObject = jsonData[i];
         if (currentObject['pn'] === pn && currentObject.hasOwnProperty('pch')) {
@@ -536,7 +418,7 @@ export class DaikinDevice {
           return jsonData;
         }
       }
-      
+
 
     }catch (e) {
       this.log.debug('Daikin - pushObject(): Error:' + e);
@@ -545,7 +427,7 @@ export class DaikinDevice {
     return undefined;
 
 
-  
+
   }
 
   protected async sendCommand(command: object): Promise<boolean> {
@@ -563,11 +445,11 @@ export class DaikinDevice {
       else{
         this.log.debug(`Daikin - sendCommand('${this._IP}'): '${JSON.stringify(param)} ' : Error: Invalid response status code: '${response.status}'`);
       }
-  
+
       await this.fetchDeviceStatus(true);
-  
+
       return response.status === 200;
-      
+
     }
     catch(e) {
       this.log.debug(`Daikin - sendCommand('${this._IP}'): Error: '${e}'`);
@@ -597,15 +479,17 @@ export class DaikinLocalAPI {
 
   }
 
-  public async fetchDevices(climateIPs:string[], bForce:boolean = false): Promise<DaikinDevice[]> {
+  public async fetchDevices(climateIPs:string[]): Promise<DaikinDevice[]> {
 
     this.log.debug('Daikin: fetchDevices()');
     this._devices = [];
 
     for(const ip of climateIPs) {
-      const daikinDevice = new DaikinDevice(ip, this.log);
 
-      if(await this.fetchWithRetry(daikinDevice, bForce)) {
+      const daikinDevice = await this.detectDeviceWithRetry(ip);
+
+      if(daikinDevice) {
+        this.log.info(`Daikin: ${ip} detected as ${daikinDevice.getProtocolName()} device '${daikinDevice.getDeviceName()}'.`);
         this._devices.push(daikinDevice);
       }
       else {
@@ -617,14 +501,29 @@ export class DaikinLocalAPI {
     return this._devices;
   }
 
-  // A device that is briefly unreachable at startup (e.g. still booting) would
-  // otherwise be dropped until Homebridge restarts; retry a few times first.
-  private async fetchWithRetry(device: DaikinDevice, bForce: boolean): Promise<boolean> {
+  // Probe order mirrors pydaikin's factory: the newer /dsiot JSON protocol
+  // first, then the legacy BRP069 query-string protocol. A device that is
+  // briefly unreachable at startup (e.g. still booting) would otherwise be
+  // dropped until Homebridge restarts; retry a few times first.
+  private async detectDeviceWithRetry(ip: string): Promise<DaikinDevice | undefined> {
 
     for(let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
 
-      if(await device.fetchDeviceStatus(bForce || attempt > 1)) {
-        return true;
+      const candidates: DaikinDevice[] = [
+        new DaikinDsiotDevice(ip, this.log),
+        new DaikinBRP069Device(ip, this.log),
+        new DaikinAirBaseDevice(ip, this.log),
+      ];
+
+      for(const candidate of candidates) {
+
+        if(!(await candidate.probe())) {
+          continue;
+        }
+
+        if(await candidate.fetchDeviceStatus(true)) {
+          return candidate;
+        }
       }
 
       if(attempt < FETCH_ATTEMPTS) {
@@ -632,8 +531,7 @@ export class DaikinLocalAPI {
       }
     }
 
-    return false;
+    return undefined;
   }
 
 }
-

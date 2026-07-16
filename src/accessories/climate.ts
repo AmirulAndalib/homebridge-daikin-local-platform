@@ -28,6 +28,8 @@ export default class ClimateAccessory {
   private _supportsAuto = true;
   private _supportsHeat = true;
   private _supportsCool = true;
+  private _supportsHumidity = true;
+  private _supportsOutdoorTemperature = true;
 
   constructor(
     private readonly platform: DaikinPlatform,
@@ -190,26 +192,46 @@ export default class ClimateAccessory {
     */
 
     ////
-    this.services['HumiditySensor'] = this.accessory.getService(this.platform.Service.HumiditySensor)
-    || this.accessory.addService(this.platform.Service.HumiditySensor);
+    // Legacy (BRP069) units often have no humidity / outdoor-temperature
+    // sensor; only expose the services the device can actually feed.
+    this._supportsHumidity = accessory.context.device?.supportsIndoorHumidity() ?? true;
+    this._supportsOutdoorTemperature = accessory.context.device?.supportsOutdoorTemperature() ?? true;
 
-    this.services['HumiditySensor'].getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
-      .onGet(this.getCurrentRelativeHumidity.bind(this));
+    if (this._supportsHumidity) {
+      this.services['HumiditySensor'] = this.accessory.getService(this.platform.Service.HumiditySensor)
+      || this.accessory.addService(this.platform.Service.HumiditySensor);
 
-    // Separate service so it doesn't collide with HeaterCooler's
-    // CurrentTemperature, which reports the indoor value.
-    this.services['OutdoorTemperatureSensor'] =
-      this.accessory.getServiceById(this.platform.Service.TemperatureSensor, 'outdoor')
-      || this.accessory.addService(this.platform.Service.TemperatureSensor, 'Outdoor Temperature', 'outdoor');
+      this.services['HumiditySensor'].getCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity)
+        .onGet(this.getCurrentRelativeHumidity.bind(this));
+    } else {
+      // Drop the service left on an accessory cached before capability detection.
+      const staleHumidity = this.accessory.getService(this.platform.Service.HumiditySensor);
+      if (staleHumidity) {
+        this.accessory.removeService(staleHumidity);
+      }
+    }
 
-    this.services['OutdoorTemperatureSensor']
-      .getCharacteristic(this.platform.Characteristic.CurrentTemperature)
-      .setProps({
-        minValue: -100,
-        maxValue: 100,
-        minStep: 0.5,
-      })
-      .onGet(this.getOutdoorTemperature.bind(this));
+    if (this._supportsOutdoorTemperature) {
+      // Separate service so it doesn't collide with HeaterCooler's
+      // CurrentTemperature, which reports the indoor value.
+      this.services['OutdoorTemperatureSensor'] =
+        this.accessory.getServiceById(this.platform.Service.TemperatureSensor, 'outdoor')
+        || this.accessory.addService(this.platform.Service.TemperatureSensor, 'Outdoor Temperature', 'outdoor');
+
+      this.services['OutdoorTemperatureSensor']
+        .getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+        .setProps({
+          minValue: -100,
+          maxValue: 100,
+          minStep: 0.5,
+        })
+        .onGet(this.getOutdoorTemperature.bind(this));
+    } else {
+      const staleOutdoor = this.accessory.getServiceById(this.platform.Service.TemperatureSensor, 'outdoor');
+      if (staleOutdoor) {
+        this.accessory.removeService(staleOutdoor);
+      }
+    }
 
     //////////
     // Update characteristic values asynchronously instead of using onGet handlers
@@ -546,10 +568,12 @@ export default class ClimateAccessory {
         this.services['Climate'].updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.accessory.context.device.getTargetTemperatureWithMode(CLIMATE_MODE_COOLING));
       }
   
-      this.services['HumiditySensor'].updateCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity, this.accessory.context.device.getIndoorHumidity());
+      if (this._supportsHumidity) {
+        this.services['HumiditySensor'].updateCharacteristic(this.platform.Characteristic.CurrentRelativeHumidity, this.accessory.context.device.getIndoorHumidity());
+      }
 
       const outdoorTemp = this.accessory.context.device.getOutdoorTemperature();
-      if (Number.isFinite(outdoorTemp)) {
+      if (this._supportsOutdoorTemperature && Number.isFinite(outdoorTemp)) {
         this.services['OutdoorTemperatureSensor']
           .updateCharacteristic(this.platform.Characteristic.CurrentTemperature, outdoorTemp);
       }

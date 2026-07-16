@@ -7,6 +7,15 @@
 
 ## How it works
 The plugin communicates with your AC units through the local api from devices. This means your units must be set up there and connect to lan before you can use this plugin.
+
+## Supported devices
+The plugin auto-detects, per IP address, which of the two local protocols the unit speaks — no configuration needed:
+
+* **Newer adapters (firmware 2.8.0+)** using the JSON `/dsiot/multireq` API (e.g. BRP069C4x and recent built-in WiFi modules).
+* **Legacy adapters** using the query-string API (`/common/basic_info`, `/aircon/get_control_info`, ...) — the same devices supported by the [Home Assistant Daikin integration](https://www.home-assistant.io/integrations/daikin/) via BRP069-style adapters (BRP069A/Bxx and older built-in WiFi units, e.g. US FTXM-W "ATMOSPHERA" series). Set semantics follow [pydaikin](https://github.com/fredrike/pydaikin).
+* **AirBase (BRP15B61) adapters**, common on Australian ducted systems — same query-string API under a `skyfi/` path prefix, with the AirBase mode and 3-speed fan numbering. Zone control is not exposed yet.
+
+You can verify which protocol your unit speaks: `http://<ip>/common/basic_info` answers `ret=OK,...` on a legacy unit, `http://<ip>/skyfi/common/basic_info` on an AirBase unit; newer units answer on `/dsiot/multireq`. Adapters requiring credentials (BRP072C key, SkyFi password) are not supported yet.
 ## Homebridge setup
 Configure the plugin through the settings UI or directly in the JSON editor:
 
