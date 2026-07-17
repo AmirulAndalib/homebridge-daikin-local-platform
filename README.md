@@ -18,7 +18,9 @@ The plugin auto-detects, per IP address, which of the two local protocols the un
 
 You can verify which protocol your unit speaks: `http://<ip>/common/basic_info` answers `ret=OK,...` on a legacy unit, `http://<ip>/skyfi/common/basic_info` on an AirBase unit; newer units answer on `/dsiot/multireq`. A unit that answers `/common/basic_info` but returns *page not found* for `/aircon/get_control_info` is a secure BRP072C-style adapter and needs its key configured. SkyFi (password-based) adapters are not supported yet.
 ## Homebridge setup
-Configure the plugin through the settings UI or directly in the JSON editor:
+Configure the plugin through the settings UI or directly in the JSON editor.
+
+In the settings UI, the **Device finder** section can scan your local network (UDP broadcast) and list the Daikin units it finds — one click adds a unit to *Climate IPs*, and secure BRP072C units are flagged so you can enter their key right away. Note that the scan cannot cross subnets or leave a Docker *bridge* network (use host networking, or enter the IP manually).
 
 ```json
 {

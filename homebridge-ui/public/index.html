@@ -1,7 +1,28 @@
-<!-- Custom settings section for secure BRP072C adapter keys. The standard
-     schema form (name / climateIPs / debugMode) is rendered below it via
-     homebridge.showSchemaForm(), so existing users see the familiar UI and
-     this section stays collapsed unless it is needed. -->
+<!-- Custom settings sections rendered above the standard schema form
+     (name / climateIPs / debugMode), which homebridge.showSchemaForm()
+     renders below so existing users keep the familiar UI. -->
+
+<!-- Device finder: asks the UI server (homebridge-ui/server.js) to UDP-
+     broadcast the Daikin discovery probe on the Homebridge host's LAN and
+     lists units that are not in climateIPs yet. -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex align-items-center">
+      <strong class="mr-auto">Device finder</strong>
+      <button type="button" id="dlpScan" class="btn btn-primary btn-sm">Scan network</button>
+    </div>
+    <p class="text-muted small mt-2 mb-0">
+      Searches the local network for Daikin units (UDP broadcast, ~4 seconds) so
+      you can add them without typing IP addresses. If Homebridge runs in a
+      Docker <em>bridge</em> network the broadcast cannot reach your LAN — use
+      host networking or enter the IP manually.
+    </p>
+    <div id="dlpScanResults" class="mt-2"></div>
+  </div>
+</div>
+
+<!-- Secure BRP072C adapter keys. Collapsed unless keys exist or a scan
+     result needs one. -->
 <div class="card mb-3">
   <div class="card-body py-2">
     <a href="#" id="dlpKeysToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
@@ -142,6 +163,121 @@
     rows.push({ ip: '', key: '' });
     render();
   });
+
+  // ------------------------------------------------------------------
+  // Device finder
+  // ------------------------------------------------------------------
+
+  const scanButton = document.getElementById('dlpScan');
+  const resultsHost = document.getElementById('dlpScanResults');
+
+  // Configured entries may carry a port ("ip:8080"); compare on the bare IP.
+  function configuredIPs(config) {
+    return (config.climateIPs || []).map((entry) => String(entry).split(':')[0]);
+  }
+
+  scanButton.addEventListener('click', async () => {
+    scanButton.disabled = true;
+    homebridge.showSpinner();
+    try {
+      const result = await homebridge.request('/discover');
+      await renderScanResults(result.devices || []);
+    } catch (e) {
+      homebridge.toast.error(e.message || String(e), 'Scan failed');
+    } finally {
+      homebridge.hideSpinner();
+      scanButton.disabled = false;
+    }
+  });
+
+  async function renderScanResults(devices) {
+    resultsHost.innerHTML = '';
+
+    if (devices.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'text-muted small mb-0';
+      empty.textContent = 'No Daikin devices replied. They may be powered off, on another subnet, or unreachable by broadcast (Docker bridge network).';
+      resultsHost.appendChild(empty);
+      return;
+    }
+
+    const pluginConfig = await homebridge.getPluginConfig();
+    const known = pluginConfig.length > 0 ? configuredIPs(pluginConfig[0]) : [];
+
+    for (const device of devices) {
+      const line = document.createElement('div');
+      line.className = 'd-flex align-items-center border-top py-1';
+
+      const label = document.createElement('div');
+      label.className = 'mr-auto';
+      const title = document.createElement('div');
+      title.textContent = (device.name || '(unnamed)') + (device.secure ? ' \u{1F512}' : '');
+      const detail = document.createElement('div');
+      detail.className = 'text-muted small';
+      detail.textContent = device.ip
+        + (device.mac ? ' · ' + device.mac : '')
+        + (device.firmware ? ' · fw ' + device.firmware : '');
+      label.appendChild(title);
+      label.appendChild(detail);
+      line.appendChild(label);
+
+      if (known.includes(device.ip)) {
+        const badge = document.createElement('span');
+        badge.className = 'badge badge-secondary';
+        badge.textContent = 'Already added';
+        line.appendChild(badge);
+      } else {
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'btn btn-success btn-sm';
+        addButton.textContent = 'Add';
+        addButton.addEventListener('click', () => addDevice(device, line, addButton));
+        line.appendChild(addButton);
+      }
+
+      resultsHost.appendChild(line);
+    }
+  }
+
+  async function addDevice(device, line, addButton) {
+    addButton.disabled = true;
+
+    const pluginConfig = await homebridge.getPluginConfig();
+    if (pluginConfig.length === 0) {
+      pluginConfig.push({ platform: platformName, name: platformName });
+    }
+    const config = pluginConfig[0];
+
+    if (!Array.isArray(config.climateIPs)) {
+      config.climateIPs = [];
+    }
+    if (!configuredIPs(config).includes(device.ip)) {
+      config.climateIPs.push(device.ip);
+    }
+    await homebridge.updatePluginConfig(pluginConfig);
+
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-secondary';
+    badge.textContent = 'Already added';
+    line.replaceChild(badge, addButton);
+
+    if (device.secure) {
+      // Secure BRP072C unit: pre-fill a key row so the user only has to
+      // type the 13-digit key.
+      if (!rows.some((row) => row.ip === device.ip)) {
+        rows.push({ ip: device.ip, key: '' });
+        render();
+      }
+      setExpanded(true);
+      homebridge.toast.warning(`${device.name || device.ip} is a secure adapter - enter its 13-digit key below, then save.`, 'Key required');
+    } else {
+      homebridge.toast.success(`${device.name || device.ip} added - remember to save.`, 'Device added');
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Init
+  // ------------------------------------------------------------------
 
   const pluginConfig = await homebridge.getPluginConfig();
   rows = pluginConfig.length > 0 ? readRowsFromConfig(pluginConfig[0]) : [];
