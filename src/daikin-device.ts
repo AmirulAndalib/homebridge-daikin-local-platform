@@ -121,7 +121,7 @@ export abstract class DaikinDevice {
     const response = await this.queryDevice(bForce);
 
     if(response === undefined) {
-      this.log.error(`Daikin - fetchDeviceStatus(${bForce}): Error: No response from device`);
+      this.log.error(`Daikin - fetchDeviceStatus('${this._IP}', ${bForce}): Error: No response from device`);
       return false;
     }
 

@@ -518,12 +518,19 @@ export class DaikinLocalAPI {
       for(const candidate of candidates) {
 
         if(!(await candidate.probe())) {
+          // Visible on the first pass only, so users can see which protocols
+          // were ruled out without the retries tripling the noise.
+          if(attempt === 1) {
+            this.log.info(`Daikin: ${ip} does not answer the ${candidate.getProtocolName()} protocol.`);
+          }
           continue;
         }
 
         if(await candidate.fetchDeviceStatus(true)) {
           return candidate;
         }
+
+        this.log.info(`Daikin: ${ip} answers the ${candidate.getProtocolName()} probe but the full status query failed - not a ${candidate.getProtocolName()} device.`);
       }
 
       if(attempt < FETCH_ATTEMPTS) {

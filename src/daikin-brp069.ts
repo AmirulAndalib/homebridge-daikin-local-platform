@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 import {
   DaikinDevice,
   CLIMATE_MODE_FAN,
@@ -157,43 +159,58 @@ export class DaikinBRP069Device extends DaikinDevice {
 
   protected async _doQuery(): Promise<any> {
 
-    try {
+    const resources = [...INFO_RESOURCES];
 
-      const resources = [...INFO_RESOURCES];
-
-      // Static resources only need to be fetched once per device object.
-      for (const resource of STATIC_RESOURCES) {
-        if (this._Response[resource] === undefined) {
-          resources.unshift(resource);
-        }
+    // Static resources only need to be fetched once per device object.
+    for (const resource of STATIC_RESOURCES) {
+      if (this._Response[resource] === undefined) {
+        resources.unshift(resource);
       }
-
-      for (const resource of resources) {
-        const values = await this.getResource(resource);
-
-        if (values === undefined) {
-          // model_info is optional (some adapters report NOTSUPPORT); everything else is required.
-          if (resource === RESOURCE_MODEL_INFO) {
-            this._Response[resource] = {};
-            continue;
-          }
-          this.log.debug(`Daikin - queryDevice('${this._IP}'): Error: no valid response for '${resource}'`);
-          return undefined;
-        }
-
-        this._Response[resource] = values;
-      }
-
-      this._lastUpdateTimestamp = Date.now();
-
-      return this._Response;
-
-    }
-    catch(e) {
-      this.log.debug(`Daikin - queryDevice('${this._IP}'): Error: '${e}'`);
     }
 
-    return undefined;
+    for (const resource of resources) {
+
+      let values: Record<string, string> | undefined;
+      let status: number | undefined;
+      let failure = 'device rejected the request';
+
+      try {
+        values = await this.getResource(resource);
+      }
+      catch(e) {
+        // axios throws on non-2xx responses, so 404s from units that don't
+        // serve a resource land here rather than in getResource.
+        status = axios.isAxiosError(e) ? e.response?.status : undefined;
+        failure = status !== undefined ? `HTTP ${status}` : `${e}`;
+      }
+
+      if (values === undefined) {
+
+        // model_info is optional (some adapters report NOTSUPPORT or 404 it); everything else is required.
+        if (resource === RESOURCE_MODEL_INFO) {
+          this._Response[resource] = {};
+          continue;
+        }
+
+        this.log.error(`Daikin: ${this._IP}: request for '/${resource}' failed (${failure}).`);
+
+        // A unit that answers basic_info over plain HTTP but 404s the aircon
+        // endpoints is almost certainly a secure BRP072C-style adapter (the
+        // ones paired with the Daikin Comfort Control app): those only serve
+        // the control endpoints over HTTPS after registering the adapter key.
+        if (resource === RESOURCE_CONTROL_INFO && status === 404 && this._Response[RESOURCE_BASIC_INFO] !== undefined) {
+          this.log.info(`Daikin: ${this._IP}: the unit answers '/${RESOURCE_BASIC_INFO}' but not '/${RESOURCE_CONTROL_INFO}' over plain HTTP. It looks like a secure BRP072C-style adapter (Daikin Comfort Control app), which requires HTTPS and key registration and is not supported by this plugin yet.`);
+        }
+
+        return undefined;
+      }
+
+      this._Response[resource] = values;
+    }
+
+    this._lastUpdateTimestamp = Date.now();
+
+    return this._Response;
   }
 
   protected getValue(resource: string, key: string): string | undefined {
