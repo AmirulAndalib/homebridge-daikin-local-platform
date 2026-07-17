@@ -18,9 +18,9 @@
       the list below.
     </p>
     <div class="d-flex align-items-center mb-2">
-      <button type="button" id="dlpScan" class="btn btn-primary btn-sm mr-1">Scan network</button>
+      <button type="button" id="dlpScan" class="btn btn-primary btn-sm" style="margin-right: 8px;">Scan network</button>
       <button type="button" id="dlpDeviceAdd" class="btn btn-outline-secondary btn-sm">Add manually</button>
-      <span id="dlpScanStatus" class="text-muted small ml-2"></span>
+      <span id="dlpScanStatus" class="text-muted small" style="margin-left: 12px;"></span>
     </div>
     <div id="dlpDeviceRows"></div>
   </div>
@@ -31,9 +31,9 @@
 <div class="card mb-3">
   <div class="card-body py-2">
     <a href="#" id="dlpKeysToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
-      <span id="dlpKeysChevron" class="mr-2">&#9656;</span>
+      <span id="dlpKeysChevron" style="margin-right: 8px;">&#9656;</span>
       <strong>Secure adapter keys (BRP072C)</strong>
-      <span id="dlpKeysCount" class="badge badge-info ml-2" style="display: none;"></span>
+      <span id="dlpKeysCount" class="badge badge-info bg-info" style="display: none; margin-left: 8px;"></span>
     </a>
     <div id="dlpKeysBody" style="display: none;">
       <p class="text-muted small mt-2 mb-2">
@@ -53,7 +53,7 @@
 <div class="card mb-3">
   <div class="card-body py-2">
     <a href="#" id="dlpAdvToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
-      <span id="dlpAdvChevron" class="mr-2">&#9656;</span>
+      <span id="dlpAdvChevron" style="margin-right: 8px;">&#9656;</span>
       <strong>Advanced</strong>
     </a>
     <div id="dlpAdvBody" style="display: none;">
@@ -61,9 +61,9 @@
         <label for="dlpName" class="small mb-1">Plugin name (shown in the Homebridge log)</label>
         <input type="text" id="dlpName" class="form-control form-control-sm" placeholder="Daikin Local Platform">
       </div>
-      <div class="custom-control custom-checkbox mb-1">
-        <input type="checkbox" id="dlpDebug" class="custom-control-input">
-        <label for="dlpDebug" class="custom-control-label small">Debug mode — print debugging information to the log</label>
+      <div class="custom-control custom-checkbox form-check mb-1">
+        <input type="checkbox" id="dlpDebug" class="custom-control-input form-check-input">
+        <label for="dlpDebug" class="custom-control-label form-check-label small">Debug mode — print debugging information to the log</label>
       </div>
     </div>
   </div>
@@ -256,10 +256,10 @@
         const actions = actionsBox();
 
         if (info && info.secure && !hasKeyFor(row.value)) {
-          actions.appendChild(badge('needs key', 'badge-warning'));
+          actions.appendChild(badge('needs key', 'badge-warning bg-warning text-dark'));
         }
         if (!info && scanDone) {
-          actions.appendChild(badge('no reply', 'badge-light'));
+          actions.appendChild(badge('no reply', 'badge-light bg-light text-dark'));
         }
 
         const editButton = iconButton('edit', 'btn-outline-secondary', 'Edit IP address');
@@ -294,7 +294,7 @@
       line.appendChild(deviceLabel(device, device.ip));
 
       const actions = actionsBox();
-      actions.appendChild(badge('found', 'badge-info'));
+      actions.appendChild(badge('found', 'badge-info bg-info'));
 
       const addButton = iconButton('add', 'btn-outline-success', 'Add to configuration');
       addButton.addEventListener('click', () => addDiscovered(device));
@@ -392,43 +392,40 @@
 
     keyRows.forEach((row, index) => {
       const line = document.createElement('div');
-      line.className = 'form-row align-items-center mb-1';
+      line.className = 'mb-1';
+      line.style.display = 'flex';
+      line.style.alignItems = 'center';
 
-      const ipCol = document.createElement('div');
-      ipCol.className = 'col-5';
       const ipInput = document.createElement('input');
       ipInput.type = 'text';
       ipInput.className = 'form-control form-control-sm';
+      ipInput.style.flex = '1 1 0';
+      ipInput.style.marginRight = '8px';
       ipInput.placeholder = 'IP address (e.g. 10.1.10.120)';
       ipInput.value = row.ip;
       ipInput.addEventListener('input', () => { row.ip = ipInput.value; sync(); renderDevices(); });
-      ipCol.appendChild(ipInput);
 
-      const keyCol = document.createElement('div');
-      keyCol.className = 'col-5';
       const keyInput = document.createElement('input');
       keyInput.type = 'text';
       keyInput.className = 'form-control form-control-sm';
+      keyInput.style.flex = '1 1 0';
+      keyInput.style.marginRight = '8px';
       keyInput.placeholder = '13-digit key';
       keyInput.value = row.key;
       keyInput.addEventListener('input', () => { row.key = keyInput.value; sync(); renderDevices(); });
-      keyCol.appendChild(keyInput);
 
-      const removeCol = document.createElement('div');
-      removeCol.className = 'col-2';
-      removeCol.style.textAlign = 'right';
       const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove key');
+      removeButton.style.flexShrink = '0';
       removeButton.addEventListener('click', () => {
         keyRows.splice(index, 1);
         renderKeys();
         sync();
         renderDevices();
       });
-      removeCol.appendChild(removeButton);
 
-      line.appendChild(ipCol);
-      line.appendChild(keyCol);
-      line.appendChild(removeCol);
+      line.appendChild(ipInput);
+      line.appendChild(keyInput);
+      line.appendChild(removeButton);
       keyRowsHost.appendChild(line);
     });
   }
