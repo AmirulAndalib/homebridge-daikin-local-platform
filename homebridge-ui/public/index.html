@@ -160,9 +160,21 @@
   const scanInfoFor = (entry) => lastScan.find((device) => device.ip === bareIp(entry));
   const hasKeyFor = (entry) => keyRows.some((row) => bareIp(row.ip) === bareIp(entry) && row.key.trim() !== '');
 
+  // Right-aligned action area; inline styles so the alignment does not
+  // depend on which Bootstrap version Config UI X injects into the iframe.
+  function actionsBox() {
+    const box = document.createElement('div');
+    box.style.marginLeft = 'auto';
+    box.style.display = 'flex';
+    box.style.alignItems = 'center';
+    box.style.flexShrink = '0';
+    return box;
+  }
+
   function deviceLabel(info, fallback) {
     const label = document.createElement('div');
-    label.className = 'mr-auto';
+    label.style.marginRight = '8px';
+    label.style.minWidth = '0';
 
     const title = document.createElement('div');
     title.textContent = info ? (info.name || '(unnamed)') + (info.secure ? ' \u{1F512}' : '') : fallback;
@@ -189,7 +201,8 @@
 
   function badge(text, className) {
     const span = document.createElement('span');
-    span.className = `badge ${className} mr-2`;
+    span.className = `badge ${className}`;
+    span.style.marginRight = '6px';
     span.textContent = text;
     return span;
   }
@@ -207,7 +220,9 @@
       if (row.editing) {
         const input = document.createElement('input');
         input.type = 'text';
-        input.className = 'form-control form-control-sm mr-2';
+        input.className = 'form-control form-control-sm';
+        input.style.flex = '1 1 auto';
+        input.style.marginRight = '8px';
         input.placeholder = 'IP address (e.g. 10.1.10.120)';
         input.value = row.value;
         input.addEventListener('input', () => { row.value = input.value; sync(); });
@@ -238,20 +253,23 @@
         const info = scanInfoFor(row.value);
         line.appendChild(deviceLabel(info, row.value));
 
+        const actions = actionsBox();
+
         if (info && info.secure && !hasKeyFor(row.value)) {
-          line.appendChild(badge('needs key', 'badge-warning'));
+          actions.appendChild(badge('needs key', 'badge-warning'));
         }
         if (!info && scanDone) {
-          line.appendChild(badge('no reply', 'badge-light'));
+          actions.appendChild(badge('no reply', 'badge-light'));
         }
 
-        const editButton = iconButton('edit', 'btn-outline-secondary mr-1', 'Edit IP address');
+        const editButton = iconButton('edit', 'btn-outline-secondary', 'Edit IP address');
+        editButton.style.marginRight = '6px';
         editButton.addEventListener('click', () => {
           row.editing = true;
           row.focus = true;
           renderDevices();
         });
-        line.appendChild(editButton);
+        actions.appendChild(editButton);
 
         const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove device');
         removeButton.addEventListener('click', () => {
@@ -259,7 +277,9 @@
           renderDevices();
           sync();
         });
-        line.appendChild(removeButton);
+        actions.appendChild(removeButton);
+
+        line.appendChild(actions);
       }
 
       deviceRowsHost.appendChild(line);
@@ -272,11 +292,15 @@
       line.className = 'd-flex align-items-center border-top py-1';
 
       line.appendChild(deviceLabel(device, device.ip));
-      line.appendChild(badge('found', 'badge-info'));
+
+      const actions = actionsBox();
+      actions.appendChild(badge('found', 'badge-info'));
 
       const addButton = iconButton('add', 'btn-outline-success', 'Add to configuration');
       addButton.addEventListener('click', () => addDiscovered(device));
-      line.appendChild(addButton);
+      actions.appendChild(addButton);
+
+      line.appendChild(actions);
 
       deviceRowsHost.appendChild(line);
     }
@@ -392,6 +416,7 @@
 
       const removeCol = document.createElement('div');
       removeCol.className = 'col-2';
+      removeCol.style.textAlign = 'right';
       const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove key');
       removeButton.addEventListener('click', () => {
         keyRows.splice(index, 1);
