@@ -14,8 +14,9 @@ The plugin auto-detects, per IP address, which of the two local protocols the un
 * **Newer adapters (firmware 2.8.0+)** using the JSON `/dsiot/multireq` API (e.g. BRP069C4x and recent built-in WiFi modules).
 * **Legacy adapters** using the query-string API (`/common/basic_info`, `/aircon/get_control_info`, ...) — the same devices supported by the [Home Assistant Daikin integration](https://www.home-assistant.io/integrations/daikin/) via BRP069-style adapters (BRP069A/Bxx and older built-in WiFi units, e.g. US FTXM-W "ATMOSPHERA" series). Set semantics follow [pydaikin](https://github.com/fredrike/pydaikin).
 * **AirBase (BRP15B61) adapters**, common on Australian ducted systems — same query-string API under a `skyfi/` path prefix, with the AirBase mode and 3-speed fan numbering. Zone control is not exposed yet.
+* **Secure BRP072C-style adapters** (the ones paired with the *Daikin Comfort Control* app, e.g. US FTXM-W "ATMOSPHERA" built-in WiFi) — same query-string API, but served only over HTTPS after registering the 13-digit key printed on the adapter/unit sticker. Add the key via `climateKeys` (see below); everything else is auto-detected.
 
-You can verify which protocol your unit speaks: `http://<ip>/common/basic_info` answers `ret=OK,...` on a legacy unit, `http://<ip>/skyfi/common/basic_info` on an AirBase unit; newer units answer on `/dsiot/multireq`. Adapters requiring credentials (BRP072C key, SkyFi password) are not supported yet.
+You can verify which protocol your unit speaks: `http://<ip>/common/basic_info` answers `ret=OK,...` on a legacy unit, `http://<ip>/skyfi/common/basic_info` on an AirBase unit; newer units answer on `/dsiot/multireq`. A unit that answers `/common/basic_info` but returns *page not found* for `/aircon/get_control_info` is a secure BRP072C-style adapter and needs its key configured. SkyFi (password-based) adapters are not supported yet.
 ## Homebridge setup
 Configure the plugin through the settings UI or directly in the JSON editor:
 
@@ -26,6 +27,9 @@ Configure the plugin through the settings UI or directly in the JSON editor:
         "platform": "Daikin Local Platform",
         "name": "Daikin Local Platform",
         "climateIPs": ["ipv4-here"],
+        "climateKeys": [
+            {"ipv4-here": "13-digit-key-here"}
+        ],
         "debugMode": false,
     }
   ]
@@ -44,6 +48,9 @@ Will be displayed in the Homebridge log.
 The IP addresses of the Daikin climate devices to be controlled.
 
 Optional:
+
+* `climateKeys` (array):
+Only needed for secure BRP072C-style adapters (see *Supported devices*). One object per unit mapping its IP address (exactly as written in `climateIPs`) to the 13-digit key printed on the adapter/unit sticker. Units without a key entry are auto-detected as before. In the Homebridge UI these are entered under *Secure adapter keys (BRP072C)* in the plugin settings.
 
 * `debugMode` (boolean):
 If `true`, the plugin will print debugging information to the Homebridge log.

@@ -125,23 +125,45 @@ export class DaikinBRP069Device extends DaikinDevice {
     return values;
   }
 
-  protected async getResource(path: string, params?: Record<string, string>): Promise<Record<string, string> | undefined> {
+  // Transport override points: DaikinBRP072CDevice swaps these for HTTPS with
+  // an X-Daikin-uuid header and a legacy-TLS agent; everything else is shared.
+  protected getBaseUrl(): string {
+    return `http://${this._IP}`;
+  }
+
+  protected getExtraHeaders(): Record<string, string> {
+    return {};
+  }
+
+  protected getHttpsAgent(): unknown {
+    return undefined;
+  }
+
+  // Raw GET for a resource; axios throws on non-2xx status codes.
+  protected async requestResource(path: string, params?: Record<string, string>): Promise<any> {
 
     const query = params ? '?' + Object.entries(params)
       .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
       .join('&') : '';
 
-    const response = await this.request({
+    return this.request({
       method: 'get',
-      url: `http://${this._IP}/${path}${query}`,
+      url: `${this.getBaseUrl()}/${path}${query}`,
       headers: {
         'User-Agent': USER_AGENT,
+        ...this.getExtraHeaders(),
       },
       timeout: REQUEST_TIMEOUT_MS,
       responseType: 'text',
       // The adapter answers with text/plain (or no content type); keep the raw body.
       transformResponse: [(data) => data],
+      httpsAgent: this.getHttpsAgent(),
     });
+  }
+
+  protected async getResource(path: string, params?: Record<string, string>): Promise<Record<string, string> | undefined> {
+
+    const response = await this.requestResource(path, params);
 
     if (response.status !== 200 || typeof response.data !== 'string') {
       this.log.debug(`Daikin - getResource('${this._IP}', '${path}'): Error: Invalid response status code: '${response.status}'`);
@@ -199,7 +221,7 @@ export class DaikinBRP069Device extends DaikinDevice {
         // ones paired with the Daikin Comfort Control app): those only serve
         // the control endpoints over HTTPS after registering the adapter key.
         if (resource === RESOURCE_CONTROL_INFO && status === 404 && this._Response[RESOURCE_BASIC_INFO] !== undefined) {
-          this.log.info(`Daikin: ${this._IP}: the unit answers '/${RESOURCE_BASIC_INFO}' but not '/${RESOURCE_CONTROL_INFO}' over plain HTTP. It looks like a secure BRP072C-style adapter (Daikin Comfort Control app), which requires HTTPS and key registration and is not supported by this plugin yet.`);
+          this.logSecureAdapterHint();
         }
 
         return undefined;
@@ -211,6 +233,13 @@ export class DaikinBRP069Device extends DaikinDevice {
     this._lastUpdateTimestamp = Date.now();
 
     return this._Response;
+  }
+
+  // Guidance shown when the plain-HTTP BRP069 probe matched but the control
+  // endpoints 404 — the signature of a secure BRP072C adapter. Overridden to
+  // a no-op by DaikinBRP072CDevice, where the message would be misleading.
+  protected logSecureAdapterHint(): void {
+    this.log.info(`Daikin: ${this._IP}: the unit answers '/${RESOURCE_BASIC_INFO}' but not '/${RESOURCE_CONTROL_INFO}' over plain HTTP. It looks like a secure BRP072C-style adapter (Daikin Comfort Control app): add its 13-digit key (printed on the adapter/unit sticker) to 'climateKeys' in the plugin settings so the plugin can control it over HTTPS.`);
   }
 
   protected getValue(resource: string, key: string): string | undefined {

@@ -1,0 +1,158 @@
+<!-- Custom settings section for secure BRP072C adapter keys. The standard
+     schema form (name / climateIPs / debugMode) is rendered below it via
+     homebridge.showSchemaForm(), so existing users see the familiar UI and
+     this section stays collapsed unless it is needed. -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <a href="#" id="dlpKeysToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
+      <span id="dlpKeysChevron" class="mr-2">&#9656;</span>
+      <strong>Secure adapter keys (BRP072C)</strong>
+      <span id="dlpKeysCount" class="badge badge-info ml-2" style="display: none;"></span>
+    </a>
+    <div id="dlpKeysBody" style="display: none;">
+      <p class="text-muted small mt-2 mb-2">
+        Most units do <strong>not</strong> need this and are detected automatically.
+        Only units paired with the <em>Daikin Comfort Control</em> app (secure
+        BRP072C-style adapters) need their 13-digit key, printed on the sticker on
+        the adapter or unit (next to SSID and MAC). If the Homebridge log shows a
+        <code>secure BRP072C-style adapter</code> hint for an IP, add that IP and
+        its key here. The IP must match the entry in <em>Climate IPs</em> exactly.
+      </p>
+      <div id="dlpKeysRows"></div>
+      <button type="button" id="dlpKeysAdd" class="btn btn-primary btn-sm mt-1">Add key</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(async () => {
+
+  const platformName = 'Daikin Local Platform';
+
+  const toggle = document.getElementById('dlpKeysToggle');
+  const chevron = document.getElementById('dlpKeysChevron');
+  const body = document.getElementById('dlpKeysBody');
+  const countBadge = document.getElementById('dlpKeysCount');
+  const rowsHost = document.getElementById('dlpKeysRows');
+  const addButton = document.getElementById('dlpKeysAdd');
+
+  // Working copy of the key list as [{ ip, key }].
+  let rows = [];
+
+  function readRowsFromConfig(config) {
+    const result = [];
+    for (const entry of config.climateKeys || []) {
+      if (entry && typeof entry === 'object') {
+        for (const ip of Object.keys(entry)) {
+          if (typeof entry[ip] === 'string') {
+            result.push({ ip: ip, key: entry[ip] });
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  // Writes the rows back in the config.json shape: [{ "<ip>": "<key>" }].
+  async function sync() {
+    // Re-read so edits made in the schema form meanwhile are not clobbered.
+    const pluginConfig = await homebridge.getPluginConfig();
+    if (pluginConfig.length === 0) {
+      pluginConfig.push({ platform: platformName, name: platformName });
+    }
+    const config = pluginConfig[0];
+
+    const entries = rows
+      .filter((row) => row.ip.trim() !== '' && row.key.trim() !== '')
+      .map((row) => ({ [row.ip.trim()]: row.key.trim() }));
+
+    if (entries.length > 0) {
+      config.climateKeys = entries;
+    } else {
+      delete config.climateKeys;
+    }
+
+    updateBadge(entries.length);
+    await homebridge.updatePluginConfig(pluginConfig);
+  }
+
+  function updateBadge(count) {
+    countBadge.textContent = String(count);
+    countBadge.style.display = count > 0 ? '' : 'none';
+  }
+
+  function render() {
+    rowsHost.innerHTML = '';
+
+    rows.forEach((row, index) => {
+      const line = document.createElement('div');
+      line.className = 'form-row align-items-center mb-1';
+
+      const ipCol = document.createElement('div');
+      ipCol.className = 'col-5';
+      const ipInput = document.createElement('input');
+      ipInput.type = 'text';
+      ipInput.className = 'form-control form-control-sm';
+      ipInput.placeholder = 'IP address (e.g. 10.1.10.120)';
+      ipInput.value = row.ip;
+      ipInput.addEventListener('input', () => { row.ip = ipInput.value; sync(); });
+      ipCol.appendChild(ipInput);
+
+      const keyCol = document.createElement('div');
+      keyCol.className = 'col-5';
+      const keyInput = document.createElement('input');
+      keyInput.type = 'text';
+      keyInput.className = 'form-control form-control-sm';
+      keyInput.placeholder = '13-digit key';
+      keyInput.value = row.key;
+      keyInput.addEventListener('input', () => { row.key = keyInput.value; sync(); });
+      keyCol.appendChild(keyInput);
+
+      const removeCol = document.createElement('div');
+      removeCol.className = 'col-2';
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'btn btn-danger btn-sm';
+      removeButton.textContent = 'Remove';
+      removeButton.addEventListener('click', () => {
+        rows.splice(index, 1);
+        render();
+        sync();
+      });
+      removeCol.appendChild(removeButton);
+
+      line.appendChild(ipCol);
+      line.appendChild(keyCol);
+      line.appendChild(removeCol);
+      rowsHost.appendChild(line);
+    });
+  }
+
+  function setExpanded(expanded) {
+    body.style.display = expanded ? '' : 'none';
+    chevron.innerHTML = expanded ? '&#9662;' : '&#9656;';
+  }
+
+  toggle.addEventListener('click', (event) => {
+    event.preventDefault();
+    setExpanded(body.style.display === 'none');
+  });
+
+  addButton.addEventListener('click', () => {
+    rows.push({ ip: '', key: '' });
+    render();
+  });
+
+  const pluginConfig = await homebridge.getPluginConfig();
+  rows = pluginConfig.length > 0 ? readRowsFromConfig(pluginConfig[0]) : [];
+  updateBadge(rows.length);
+  render();
+
+  // Users with keys configured should see them without an extra click.
+  if (rows.length > 0) {
+    setExpanded(true);
+  }
+
+  homebridge.showSchemaForm();
+})();
+</script>

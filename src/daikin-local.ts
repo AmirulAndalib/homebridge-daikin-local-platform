@@ -16,12 +16,14 @@ import {
 } from './daikin-device';
 
 import { DaikinBRP069Device } from './daikin-brp069';
+import { DaikinBRP072CDevice } from './daikin-brp072c';
 import { DaikinAirBaseDevice } from './daikin-airbase';
 
 // Shared device-facing API surface (base class, mode/fan-speed codes, tables)
 // stays importable from this module so existing imports keep working.
 export * from './daikin-device';
 export { DaikinBRP069Device } from './daikin-brp069';
+export { DaikinBRP072CDevice } from './daikin-brp072c';
 export { DaikinAirBaseDevice } from './daikin-airbase';
 
 const CLIMATE_OPERATE_ON = '00';
@@ -479,14 +481,16 @@ export class DaikinLocalAPI {
 
   }
 
-  public async fetchDevices(climateIPs:string[]): Promise<DaikinDevice[]> {
+  // climateKeys maps a configured IP (exactly as written in climateIPs, port
+  // included) to the 13-digit key of a secure BRP072C adapter.
+  public async fetchDevices(climateIPs:string[], climateKeys?: Record<string, string>): Promise<DaikinDevice[]> {
 
     this.log.debug('Daikin: fetchDevices()');
     this._devices = [];
 
     for(const ip of climateIPs) {
 
-      const daikinDevice = await this.detectDeviceWithRetry(ip);
+      const daikinDevice = await this.detectDeviceWithRetry(ip, climateKeys ? climateKeys[ip] : undefined);
 
       if(daikinDevice) {
         this.log.info(`Daikin: ${ip} detected as ${daikinDevice.getProtocolName()} device '${daikinDevice.getDeviceName()}'.`);
@@ -502,10 +506,13 @@ export class DaikinLocalAPI {
   }
 
   // Probe order mirrors pydaikin's factory: the newer /dsiot JSON protocol
-  // first, then the legacy BRP069 query-string protocol. A device that is
-  // briefly unreachable at startup (e.g. still booting) would otherwise be
-  // dropped until Homebridge restarts; retry a few times first.
-  private async detectDeviceWithRetry(ip: string): Promise<DaikinDevice | undefined> {
+  // first, then the legacy BRP069 query-string protocol. When the user
+  // configured a key for the IP, the secure BRP072C candidate goes first but
+  // the others stay as fallback, so a key entered for the wrong unit is
+  // simply ignored. A device that is briefly unreachable at startup (e.g.
+  // still booting) would otherwise be dropped until Homebridge restarts;
+  // retry a few times first.
+  private async detectDeviceWithRetry(ip: string, key?: string): Promise<DaikinDevice | undefined> {
 
     for(let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
 
@@ -514,6 +521,10 @@ export class DaikinLocalAPI {
         new DaikinBRP069Device(ip, this.log),
         new DaikinAirBaseDevice(ip, this.log),
       ];
+
+      if(key) {
+        candidates.unshift(new DaikinBRP072CDevice(ip, this.log, key));
+      }
 
       for(const candidate of candidates) {
 

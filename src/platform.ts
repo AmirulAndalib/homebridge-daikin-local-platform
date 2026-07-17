@@ -80,7 +80,24 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
     }
 
 
-    await this.daikinLocalAPI.fetchDevices(this.platformConfig.climateIPs).then((devices) => {
+    // Flatten the config's climateKeys ([{ "<ip>": "<key>" }, ...]) into an
+    // ip -> key lookup for the secure BRP072C candidates.
+    const climateKeys: Record<string, string> = {};
+
+    for (const entry of this.platformConfig.climateKeys ?? []) {
+
+      if (entry === null || typeof entry !== 'object') {
+        continue;
+      }
+
+      for (const [ip, key] of Object.entries(entry)) {
+        if (typeof key === 'string' && key.length > 0) {
+          climateKeys[ip] = key;
+        }
+      }
+    }
+
+    await this.daikinLocalAPI.fetchDevices(this.platformConfig.climateIPs, climateKeys).then((devices) => {
 
       for(let i = 0; i < devices.length; i++) {
 
