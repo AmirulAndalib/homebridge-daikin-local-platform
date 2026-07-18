@@ -1,7 +1,7 @@
 <!-- Custom settings UI. The schema-driven form is NOT shown: every field is
      rendered here so the layout can follow the task flow (devices first,
-     device exceptions second, housekeeping last). When adding a new config
-     field, add it to this page AND to config.schema.json.
+     housekeeping last). When adding a new config field, add it to this page
+     AND to config.schema.json.
      All writes are read-modify-write against getPluginConfig() so unknown
      fields (e.g. Homebridge's _bridge child-bridge block) are preserved. -->
 
@@ -20,6 +20,8 @@
 <!-- 1. Devices: one unified list. Configured units (climateIPs) are enriched
      with what the network scan reports (name/MAC/firmware/secure); scanned
      units not configured yet appear in the same list with an add button.
+     A device's 13-digit BRP072C key (climateKeys) is edited inside the
+     device's own inline edit form — there is no separate key section.
      The scan runs automatically when the page opens. -->
 <div class="card mb-3">
   <div class="card-body py-2">
@@ -27,7 +29,9 @@
     <p class="text-muted small mt-1 mb-2">
       The Daikin units this plugin controls. The network is scanned
       automatically when this page opens; units found on the network appear in
-      the list below.
+      the list below. Units marked &#128274; (secure BRP072C adapters, paired
+      with the <em>Daikin Comfort Control</em> app) also need their 13-digit
+      key &mdash; edit the device to enter it.
     </p>
     <div class="d-flex align-items-center mb-2">
       <button type="button" id="dlpScan" class="btn btn-primary btn-sm" style="margin-right: 8px;">Scan network</button>
@@ -38,30 +42,7 @@
   </div>
 </div>
 
-<!-- 2. Secure adapter keys: the exception flow for BRP072C units. Collapsed
-     unless keys exist or a scanned secure unit needs one. -->
-<div class="card mb-3">
-  <div class="card-body py-2">
-    <a href="#" id="dlpKeysToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
-      <span id="dlpKeysChevron" style="margin-right: 8px;">&#9656;</span>
-      <strong>Secure adapter keys (BRP072C)</strong>
-      <span id="dlpKeysCount" class="badge badge-info bg-info" style="display: none; margin-left: 8px;"></span>
-    </a>
-    <div id="dlpKeysBody" style="display: none;">
-      <p class="text-muted small mt-2 mb-2">
-        Most units do <strong>not</strong> need this and are detected automatically.
-        Only units paired with the <em>Daikin Comfort Control</em> app (secure
-        BRP072C-style adapters, marked &#128274; in the device list) need their
-        13-digit key, printed on the sticker on the adapter or unit (next to SSID
-        and MAC). The IP must match the entry in <em>Devices</em> exactly.
-      </p>
-      <div id="dlpKeysRows"></div>
-      <button type="button" id="dlpKeysAdd" class="btn btn-outline-secondary btn-sm mt-1">Add key</button>
-    </div>
-  </div>
-</div>
-
-<!-- 3. Advanced: housekeeping nobody touches day-to-day. -->
+<!-- 2. Advanced: housekeeping nobody touches day-to-day. -->
 <div class="card mb-3">
   <div class="card-body py-2">
     <a href="#" id="dlpAdvToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
@@ -106,33 +87,23 @@
     return button;
   }
 
-  // Working copies of the fields this page owns.
-  let deviceRows = [];              // [{ value: "<ip[:port]>", editing: bool }]
-  let keyRows = [];                 // [{ ip, key }]
+  // Working copies of the fields this page owns. A device row carries its
+  // secure-adapter key ({ value, key? } plus transient edit-state flags);
+  // climateKeys entries that match no device survive in orphanKeys until the
+  // user adopts them back or deletes them — never dropped silently.
+  let deviceRows = [];              // [{ value: "<ip[:port]>", key?, editing?, ... }]
+  let orphanKeys = [];              // [{ ip, key }]
   let nameValue = defaultName;
   let debugValue = false;
   let lastScan = [];                // devices reported by the last scan
   let scanDone = false;             // at least one scan finished
 
   const bareIp = (entry) => String(entry).trim().split(':')[0];
+  const rowKey = (row) => (row.key || '').trim();
 
   // ------------------------------------------------------------------
   // Config I/O (read-modify-write; preserves fields we don't own)
   // ------------------------------------------------------------------
-
-  function readRowsFromConfig(config) {
-    const result = [];
-    for (const entry of config.climateKeys || []) {
-      if (entry && typeof entry === 'object') {
-        for (const ip of Object.keys(entry)) {
-          if (typeof entry[ip] === 'string') {
-            result.push({ ip: ip, key: entry[ip] });
-          }
-        }
-      }
-    }
-    return result;
-  }
 
   async function sync() {
     const pluginConfig = await homebridge.getPluginConfig();
@@ -145,9 +116,13 @@
     config.climateIPs = deviceRows.map((row) => row.value.trim()).filter((value) => value !== '');
     config.debugMode = debugValue;
 
-    const keyEntries = keyRows
-      .filter((row) => row.ip.trim() !== '' && row.key.trim() !== '')
-      .map((row) => ({ [row.ip.trim()]: row.key.trim() }));
+    // The platform looks keys up by the exact climateIPs entry (port
+    // included), so device-attached keys are written under row.value;
+    // orphan entries are preserved verbatim.
+    const keyEntries = deviceRows
+      .filter((row) => row.value.trim() !== '' && rowKey(row) !== '')
+      .map((row) => ({ [row.value.trim()]: rowKey(row) }))
+      .concat(orphanKeys.map((orphan) => ({ [orphan.ip]: orphan.key })));
 
     if (keyEntries.length > 0) {
       config.climateKeys = keyEntries;
@@ -155,12 +130,11 @@
       delete config.climateKeys;
     }
 
-    updateKeyBadge(keyEntries.length);
     await homebridge.updatePluginConfig(pluginConfig);
   }
 
   // ------------------------------------------------------------------
-  // 1. Devices — one unified list of configured + discovered units
+  // Devices — one unified list of configured + discovered units
   // ------------------------------------------------------------------
 
   const deviceRowsHost = document.getElementById('dlpDeviceRows');
@@ -170,7 +144,20 @@
 
   const configuredIPs = () => deviceRows.map((row) => bareIp(row.value));
   const scanInfoFor = (entry) => lastScan.find((device) => device.ip === bareIp(entry));
-  const hasKeyFor = (entry) => keyRows.some((row) => bareIp(row.ip) === bareIp(entry) && row.key.trim() !== '');
+
+  // A device typed or discovered anew picks up a leftover key saved for the
+  // same address (e.g. the device entry was removed and later re-added).
+  function adoptOrphanKey(row) {
+    if (rowKey(row) !== '') {
+      return;
+    }
+    const index = orphanKeys.findIndex((orphan) =>
+      orphan.ip === row.value.trim() || bareIp(orphan.ip) === bareIp(row.value));
+    if (index !== -1) {
+      row.key = orphanKeys[index].key;
+      orphanKeys.splice(index, 1);
+    }
+  }
 
   // Right-aligned action area; inline styles so the alignment does not
   // depend on which Bootstrap version Config UI X injects into the iframe.
@@ -183,23 +170,24 @@
     return box;
   }
 
-  function deviceLabel(info, fallback) {
+  function deviceLabel(info, fallback, opts = {}) {
     const label = document.createElement('div');
     label.style.marginRight = '8px';
     label.style.minWidth = '0';
 
+    const secure = (info && info.secure) || opts.secure === true;
     const title = document.createElement('div');
-    title.textContent = info ? (info.name || '(unnamed)') + (info.secure ? ' \u{1F512}' : '') : fallback;
+    title.textContent = (info ? (info.name || '(unnamed)') : fallback) + (secure ? ' \u{1F512}' : '');
     label.appendChild(title);
 
-    const detailText = info
+    const detailText = opts.detail || (info
       ? [
         fallback,
         info.mac,
         info.firmware ? 'fw ' + info.firmware : '',
         info.type,
       ].filter((part) => part).join(' · ')
-      : '';
+      : '');
 
     if (detailText) {
       const detail = document.createElement('div');
@@ -219,6 +207,117 @@
     return span;
   }
 
+  // Inline edit form: the IP always, plus the 13-digit key when the unit is
+  // known to be secure (row.editSecure: scan says so, or a key already
+  // exists) or the user marks it as one (row.secureManual — covers secure
+  // units the scan cannot reach, e.g. across subnets).
+  function renderEditForm(row, index) {
+    const form = document.createElement('div');
+    form.className = 'border-top py-1';
+
+    const finishEditing = () => {
+      row.value = row.value.trim();
+      row.key = rowKey(row);
+      if (row.key === '') {
+        delete row.key;
+      }
+      delete row.editing;
+      delete row.editSecure;
+      delete row.secureManual;
+      delete row.focus;
+      delete row.focusKey;
+      if (row.value === '') {
+        deviceRows.splice(index, 1);
+      } else {
+        adoptOrphanKey(row);
+      }
+      renderDevices();
+      sync();
+    };
+
+    const onEnter = (event) => {
+      if (event.key === 'Enter') {
+        finishEditing();
+      }
+    };
+
+    const ipLine = document.createElement('div');
+    ipLine.style.display = 'flex';
+    ipLine.style.alignItems = 'center';
+
+    const ipInput = document.createElement('input');
+    ipInput.type = 'text';
+    ipInput.className = 'form-control form-control-sm';
+    ipInput.style.flex = '1 1 auto';
+    ipInput.style.marginRight = '8px';
+    ipInput.placeholder = 'IP address (e.g. 10.1.10.120)';
+    ipInput.value = row.value;
+    ipInput.addEventListener('input', () => { row.value = ipInput.value; sync(); });
+    ipInput.addEventListener('keydown', onEnter);
+    ipLine.appendChild(ipInput);
+
+    const doneButton = iconButton('done', 'btn-outline-success', 'Done');
+    doneButton.addEventListener('click', finishEditing);
+    ipLine.appendChild(doneButton);
+    form.appendChild(ipLine);
+
+    if (!row.editSecure) {
+      const checkLabel = document.createElement('label');
+      checkLabel.className = 'small text-muted';
+      checkLabel.style.display = 'block';
+      checkLabel.style.marginTop = '6px';
+      checkLabel.style.marginBottom = '0';
+
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = row.secureManual === true;
+      check.style.marginRight = '6px';
+      check.addEventListener('change', () => {
+        row.secureManual = check.checked;
+        if (check.checked) {
+          row.focusKey = true;
+        } else {
+          // The key field only appeared this session, so any key in it was
+          // just typed — unchecking discards it.
+          delete row.key;
+        }
+        renderDevices();
+        sync();
+      });
+      checkLabel.appendChild(check);
+      checkLabel.appendChild(document.createTextNode(
+        'Secure adapter (BRP072C, Daikin Comfort Control app) — needs a 13-digit key'));
+      form.appendChild(checkLabel);
+    }
+
+    let keyInput = null;
+    if (row.editSecure || row.secureManual) {
+      const keyLine = document.createElement('div');
+      keyLine.style.display = 'flex';
+      keyLine.style.alignItems = 'center';
+      keyLine.style.marginTop = '6px';
+
+      keyInput = document.createElement('input');
+      keyInput.type = 'text';
+      keyInput.className = 'form-control form-control-sm';
+      keyInput.style.flex = '1 1 auto';
+      keyInput.placeholder = '13-digit key';
+      keyInput.value = row.key || '';
+      keyInput.addEventListener('input', () => { row.key = keyInput.value; sync(); });
+      keyInput.addEventListener('keydown', onEnter);
+      keyLine.appendChild(keyInput);
+      form.appendChild(keyLine);
+
+      const hint = document.createElement('div');
+      hint.className = 'text-muted small';
+      hint.style.marginTop = '2px';
+      hint.textContent = '\u{1F512} The 13-digit key is printed on the sticker on the adapter or unit, next to SSID and MAC.';
+      form.appendChild(hint);
+    }
+
+    return { form, ipInput, keyInput };
+  }
+
   function renderDevices() {
     deviceRowsHost.innerHTML = '';
 
@@ -226,74 +325,53 @@
 
     // Configured units first, in config order.
     deviceRows.forEach((row, index) => {
+      if (row.editing) {
+        const { form, ipInput, keyInput } = renderEditForm(row, index);
+        if (row.focusKey && keyInput) {
+          delete row.focusKey;
+          pendingFocus = keyInput;
+        } else if (row.focus) {
+          delete row.focus;
+          pendingFocus = ipInput;
+        }
+        deviceRowsHost.appendChild(form);
+        return;
+      }
+
       const line = document.createElement('div');
       line.className = 'd-flex align-items-center border-top py-1';
 
-      if (row.editing) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'form-control form-control-sm';
-        input.style.flex = '1 1 auto';
-        input.style.marginRight = '8px';
-        input.placeholder = 'IP address (e.g. 10.1.10.120)';
-        input.value = row.value;
-        input.addEventListener('input', () => { row.value = input.value; sync(); });
-        input.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter') {
-            finishEditing();
-          }
-        });
-        line.appendChild(input);
+      const info = scanInfoFor(row.value);
+      line.appendChild(deviceLabel(info, row.value, { secure: rowKey(row) !== '' }));
 
-        const doneButton = iconButton('done', 'btn-outline-success', 'Done');
-        const finishEditing = () => {
-          row.editing = false;
-          if (row.value.trim() === '') {
-            deviceRows.splice(index, 1);
-          }
-          renderDevices();
-          sync();
-        };
-        doneButton.addEventListener('click', finishEditing);
-        line.appendChild(doneButton);
+      const actions = actionsBox();
 
-        if (row.focus) {
-          delete row.focus;
-          pendingFocus = input;
-        }
-      } else {
-        const info = scanInfoFor(row.value);
-        line.appendChild(deviceLabel(info, row.value));
-
-        const actions = actionsBox();
-
-        if (info && info.secure && !hasKeyFor(row.value)) {
-          actions.appendChild(badge('needs key', 'badge-warning bg-warning text-dark'));
-        }
-        if (!info && scanDone) {
-          actions.appendChild(badge('no reply', 'badge-light bg-light text-dark'));
-        }
-
-        const editButton = iconButton('edit', 'btn-outline-secondary', 'Edit IP address');
-        editButton.style.marginRight = '6px';
-        editButton.addEventListener('click', () => {
-          row.editing = true;
-          row.focus = true;
-          renderDevices();
-        });
-        actions.appendChild(editButton);
-
-        const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove device');
-        removeButton.addEventListener('click', () => {
-          deviceRows.splice(index, 1);
-          renderDevices();
-          sync();
-        });
-        actions.appendChild(removeButton);
-
-        line.appendChild(actions);
+      if (info && info.secure && rowKey(row) === '') {
+        actions.appendChild(badge('needs key', 'badge-warning bg-warning text-dark'));
+      }
+      if (!info && scanDone) {
+        actions.appendChild(badge('no reply', 'badge-light bg-light text-dark'));
       }
 
+      const editButton = iconButton('edit', 'btn-outline-secondary', 'Edit device');
+      editButton.style.marginRight = '6px';
+      editButton.addEventListener('click', () => {
+        row.editing = true;
+        row.focus = true;
+        row.editSecure = Boolean(info && info.secure) || rowKey(row) !== '';
+        renderDevices();
+      });
+      actions.appendChild(editButton);
+
+      const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove device');
+      removeButton.addEventListener('click', () => {
+        deviceRows.splice(index, 1);
+        renderDevices();
+        sync();
+      });
+      actions.appendChild(removeButton);
+
+      line.appendChild(actions);
       deviceRowsHost.appendChild(line);
     });
 
@@ -317,6 +395,38 @@
       deviceRowsHost.appendChild(line);
     }
 
+    // Leftover climateKeys entries with no matching device: kept visible so
+    // they are never dropped silently — adopt them back or delete them.
+    orphanKeys.forEach((orphan, index) => {
+      const line = document.createElement('div');
+      line.className = 'd-flex align-items-center border-top py-1';
+
+      line.appendChild(deviceLabel(null, orphan.ip, { detail: 'Saved adapter key with no matching device', secure: true }));
+
+      const actions = actionsBox();
+      actions.appendChild(badge('unused key', 'badge-light bg-light text-dark'));
+
+      const addButton = iconButton('add', 'btn-outline-success', 'Add as device (keeps the key)');
+      addButton.addEventListener('click', () => {
+        deviceRows.push({ value: orphan.ip, key: orphan.key });
+        orphanKeys.splice(index, 1);
+        renderDevices();
+        sync();
+      });
+      actions.appendChild(addButton);
+
+      const removeButton = iconButton('remove', 'btn-outline-danger', 'Delete key');
+      removeButton.addEventListener('click', () => {
+        orphanKeys.splice(index, 1);
+        renderDevices();
+        sync();
+      });
+      actions.appendChild(removeButton);
+
+      line.appendChild(actions);
+      deviceRowsHost.appendChild(line);
+    });
+
     if (deviceRowsHost.children.length === 0) {
       const empty = document.createElement('p');
       empty.className = 'text-muted small mb-0';
@@ -332,19 +442,21 @@
   }
 
   function addDiscovered(device) {
-    if (!configuredIPs().includes(device.ip)) {
-      deviceRows.push({ value: device.ip, editing: false });
+    if (configuredIPs().includes(device.ip)) {
+      return;
     }
 
-    if (device.secure) {
-      // Secure BRP072C unit: pre-fill a key row so the user only has to
-      // type the 13-digit key.
-      if (!keyRows.some((row) => bareIp(row.ip) === device.ip)) {
-        keyRows.push({ ip: device.ip, key: '' });
-        renderKeys();
-      }
-      setKeysExpanded(true);
-      homebridge.toast.warning(`${device.name || device.ip} is a secure adapter - enter its 13-digit key below, then save.`, 'Key required');
+    const row = { value: device.ip };
+    adoptOrphanKey(row);
+    deviceRows.push(row);
+
+    if (device.secure && rowKey(row) === '') {
+      // Open the new row's edit form with the key field focused, so the key
+      // is typed right where the device lives.
+      row.editing = true;
+      row.editSecure = true;
+      row.focusKey = true;
+      homebridge.toast.warning(`${device.name || device.ip} is a secure adapter - enter its 13-digit key, then save.`, 'Key required');
     } else {
       homebridge.toast.success(`${device.name || device.ip} added - remember to save.`, 'Device added');
     }
@@ -374,7 +486,8 @@
     } finally {
       scanButton.disabled = false;
       // Don't stomp an in-progress edit: the auto-scan can finish while the
-      // user is typing an IP. The list refreshes on their next action anyway.
+      // user is typing an IP or key. The list refreshes on their next action
+      // anyway.
       if (!deviceRowsHost.contains(document.activeElement)) {
         renderDevices();
       }
@@ -384,81 +497,7 @@
   scanButton.addEventListener('click', runScan);
 
   // ------------------------------------------------------------------
-  // 2. Secure adapter keys
-  // ------------------------------------------------------------------
-
-  const keysToggle = document.getElementById('dlpKeysToggle');
-  const keysChevron = document.getElementById('dlpKeysChevron');
-  const keysBody = document.getElementById('dlpKeysBody');
-  const keysCountBadge = document.getElementById('dlpKeysCount');
-  const keyRowsHost = document.getElementById('dlpKeysRows');
-  const keyAddButton = document.getElementById('dlpKeysAdd');
-
-  function updateKeyBadge(count) {
-    keysCountBadge.textContent = String(count);
-    keysCountBadge.style.display = count > 0 ? '' : 'none';
-  }
-
-  function renderKeys() {
-    keyRowsHost.innerHTML = '';
-
-    keyRows.forEach((row, index) => {
-      const line = document.createElement('div');
-      line.className = 'mb-1';
-      line.style.display = 'flex';
-      line.style.alignItems = 'center';
-
-      const ipInput = document.createElement('input');
-      ipInput.type = 'text';
-      ipInput.className = 'form-control form-control-sm';
-      ipInput.style.flex = '1 1 0';
-      ipInput.style.marginRight = '8px';
-      ipInput.placeholder = 'IP address (e.g. 10.1.10.120)';
-      ipInput.value = row.ip;
-      ipInput.addEventListener('input', () => { row.ip = ipInput.value; sync(); renderDevices(); });
-
-      const keyInput = document.createElement('input');
-      keyInput.type = 'text';
-      keyInput.className = 'form-control form-control-sm';
-      keyInput.style.flex = '1 1 0';
-      keyInput.style.marginRight = '8px';
-      keyInput.placeholder = '13-digit key';
-      keyInput.value = row.key;
-      keyInput.addEventListener('input', () => { row.key = keyInput.value; sync(); renderDevices(); });
-
-      const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove key');
-      removeButton.style.flexShrink = '0';
-      removeButton.addEventListener('click', () => {
-        keyRows.splice(index, 1);
-        renderKeys();
-        sync();
-        renderDevices();
-      });
-
-      line.appendChild(ipInput);
-      line.appendChild(keyInput);
-      line.appendChild(removeButton);
-      keyRowsHost.appendChild(line);
-    });
-  }
-
-  function setKeysExpanded(expanded) {
-    keysBody.style.display = expanded ? '' : 'none';
-    keysChevron.innerHTML = expanded ? '&#9662;' : '&#9656;';
-  }
-
-  keysToggle.addEventListener('click', (event) => {
-    event.preventDefault();
-    setKeysExpanded(keysBody.style.display === 'none');
-  });
-
-  keyAddButton.addEventListener('click', () => {
-    keyRows.push({ ip: '', key: '' });
-    renderKeys();
-  });
-
-  // ------------------------------------------------------------------
-  // 3. Advanced
+  // 2. Advanced
   // ------------------------------------------------------------------
 
   const advToggle = document.getElementById('dlpAdvToggle');
@@ -485,22 +524,35 @@
   const config = pluginConfig.length > 0 ? pluginConfig[0] : {};
 
   deviceRows = Array.isArray(config.climateIPs)
-    ? config.climateIPs.map((entry) => ({ value: String(entry), editing: false }))
+    ? config.climateIPs.map((entry) => ({ value: String(entry) }))
     : [];
-  keyRows = readRowsFromConfig(config);
+
+  // Attach each climateKeys entry to its device row — exact entry first (the
+  // form the platform looks up), then bare-IP as a repair for configs written
+  // when keys were a separate section. Leftovers become orphan rows.
+  for (const entry of config.climateKeys || []) {
+    if (entry && typeof entry === 'object') {
+      for (const ip of Object.keys(entry)) {
+        if (typeof entry[ip] !== 'string') {
+          continue;
+        }
+        const row = deviceRows.find((candidate) => candidate.value.trim() === ip.trim() && rowKey(candidate) === '')
+          || deviceRows.find((candidate) => bareIp(candidate.value) === bareIp(ip) && rowKey(candidate) === '');
+        if (row) {
+          row.key = entry[ip];
+        } else {
+          orphanKeys.push({ ip: ip, key: entry[ip] });
+        }
+      }
+    }
+  }
+
   nameValue = typeof config.name === 'string' && config.name !== '' ? config.name : defaultName;
   debugValue = config.debugMode === true;
 
   nameInput.value = nameValue;
   debugInput.checked = debugValue;
-  updateKeyBadge(keyRows.length);
   renderDevices();
-  renderKeys();
-
-  // Users with keys configured should see them without an extra click.
-  if (keyRows.length > 0) {
-    setKeysExpanded(true);
-  }
 
   // Scan right away so the page opens with live device information.
   runScan();

@@ -22,6 +22,16 @@
           "type": "string"
         }
       },
+      "climateKeys": {
+        "type": "array",
+        "description": "13-digit keys for secure (BRP072C) adapters. One entry per device, in the form { \"<ip exactly as written in climateIPs>\": \"<key>\" }. Edited from the device list in the settings UI.",
+        "items": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
       "debugMode": {
         "title": "Debug Mode",
         "description": "When enabled, debug messages will be written to the log.",
