@@ -5,6 +5,18 @@
      All writes are read-modify-write against getPluginConfig() so unknown
      fields (e.g. Homebridge's _bridge child-bridge block) are preserved. -->
 
+<!-- Dark-mode fix: Config UI X mirrors its theme into this iframe only as
+     body classes (dark themes add `dark-mode`), while the injected Bootstrap
+     5.3 sheet keeps :root in light theme — so .text-muted resolves to a
+     near-black --bs-secondary-color, unreadable on the dark #2b2b2b card.
+     Derive muted text from the card's own text colour (white) instead. -->
+<style>
+  body.dark-mode .text-muted {
+    color: inherit !important;
+    opacity: 0.7;
+  }
+</style>
+
 <!-- 1. Devices: one unified list. Configured units (climateIPs) are enriched
      with what the network scan reports (name/MAC/firmware/secure); scanned
      units not configured yet appear in the same list with an add button.
