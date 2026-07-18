@@ -3,7 +3,7 @@ import { Agent } from 'https';
 import { createHash, constants as cryptoConstants } from 'crypto';
 
 import DaikinPlatformLogger from './logger';
-import { DaikinBRP069Device } from './daikin-brp069';
+import { DaikinBRP069Device, RESOURCE_BASIC_INFO } from './daikin-brp069';
 
 // Secure BRP072Cxx adapters (the ones paired with the Daikin Comfort Control
 // app) speak the exact same query-string protocol as BRP069, but only over
@@ -92,7 +92,15 @@ export class DaikinBRP072CDevice extends DaikinBRP069Device {
         this.log.error(`Daikin: ${this._IP}: the adapter rejected the configured key (HTTP 403) - check the 13-digit key printed on the adapter/unit sticker.`);
       }
       else {
-        this.log.debug(`Daikin - register('${this._IP}'): Error: '${e}'`);
+        // A key is configured for this IP, so the user expects the secure
+        // protocol to work — surface the real reason (connection refused,
+        // TLS handshake, unexpected status, ...) instead of hiding it
+        // behind debugMode.
+        this.log.error(`Daikin: ${this._IP}: could not register with the secure adapter ('https://${this._IP}/${RESOURCE_REGISTER_TERMINAL}' failed: ${this.describeRequestError(e)}).`);
+
+        if (axios.isAxiosError(e) && (e.code === 'ECONNREFUSED' || e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT' || e.code === 'EHOSTUNREACH')) {
+          this.log.error(`Daikin: ${this._IP}: the secure protocol needs HTTPS (TCP port 443) access to the unit - check that no firewall between the Homebridge host and the unit blocks it.`);
+        }
       }
     }
 
@@ -123,6 +131,13 @@ export class DaikinBRP072CDevice extends DaikinBRP069Device {
     }
 
     return result;
+  }
+
+  // Unlike the plain-HTTP probes, this probe only runs when the user
+  // configured a key for the IP, so a request failing after a successful
+  // registration is worth surfacing at error level.
+  protected logProbeFailure(e: unknown): void {
+    this.log.error(`Daikin: ${this._IP}: secure request for '/${RESOURCE_BASIC_INFO}' failed after registration (${this.describeRequestError(e)}).`);
   }
 
   // The plain-HTTP hint from the base class doesn't apply here — we are

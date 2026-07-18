@@ -101,10 +101,34 @@ export class DaikinBRP069Device extends DaikinDevice {
       return await this.getResource(RESOURCE_BASIC_INFO) !== undefined;
     }
     catch(e) {
-      this.log.debug(`Daikin - probe('${this._IP}'): not a ${this.getProtocolName()} device: '${e}'`);
+      this.logProbeFailure(e);
     }
 
     return false;
+  }
+
+  // Probing the wrong protocol is expected during discovery, so stay quiet by
+  // default. DaikinBRP072CDevice overrides this to log at error level: its
+  // probe only runs when the user configured a key for the IP, so a failure
+  // there is a real problem the user must see.
+  protected logProbeFailure(e: unknown): void {
+    this.log.debug(`Daikin - probe('${this._IP}'): not a ${this.getProtocolName()} device: '${e}'`);
+  }
+
+  // Human-readable reason for a failed request: the HTTP status when the
+  // device answered, otherwise the network/TLS error code and message.
+  protected describeRequestError(e: unknown): string {
+
+    if (axios.isAxiosError(e)) {
+
+      if (e.response?.status !== undefined) {
+        return `HTTP ${e.response.status}`;
+      }
+
+      return e.code !== undefined ? `${e.code}: ${e.message}` : e.message;
+    }
+
+    return `${e}`;
   }
 
   // Parses the `ret=OK,pow=1,name=%4c...`-style body into a key/value map.
@@ -203,7 +227,7 @@ export class DaikinBRP069Device extends DaikinDevice {
         // axios throws on non-2xx responses, so 404s from units that don't
         // serve a resource land here rather than in getResource.
         status = axios.isAxiosError(e) ? e.response?.status : undefined;
-        failure = status !== undefined ? `HTTP ${status}` : `${e}`;
+        failure = this.describeRequestError(e);
       }
 
       if (values === undefined) {
