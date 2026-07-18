@@ -20,7 +20,7 @@ You can verify which protocol your unit speaks: `http://<ip>/common/basic_info` 
 ## Homebridge setup
 Configure the plugin through the settings UI or directly in the JSON editor.
 
-In the settings UI, the **Device finder** section can scan your local network (UDP broadcast) and list the Daikin units it finds — one click adds a unit to *Climate IPs*, and secure BRP072C units are flagged so you can enter their key right away. Note that the scan cannot cross subnets or leave a Docker *bridge* network (use host networking, or enter the IP manually).
+In the settings UI, the device list scans your local network automatically (UDP broadcast) and shows the Daikin units it finds — one click adds a unit, and for secure BRP072C units (marked 🔒) the edit form opens right away so you can enter the 13-digit key. Note that the scan cannot cross subnets or leave a Docker *bridge* network (use host networking, or enter the IP manually — tick *Secure adapter* in the edit form if such a unit needs a key).
 
 ```json
 {
@@ -52,7 +52,7 @@ The IP addresses of the Daikin climate devices to be controlled.
 Optional:
 
 * `climateKeys` (array):
-Only needed for secure BRP072C-style adapters (see *Supported devices*). One object per unit mapping its IP address (exactly as written in `climateIPs`) to the 13-digit key printed on the adapter/unit sticker. Units without a key entry are auto-detected as before. In the Homebridge UI these are entered under *Secure adapter keys (BRP072C)* in the plugin settings.
+Only needed for secure BRP072C-style adapters (see *Supported devices*). One object per unit mapping its IP address (exactly as written in `climateIPs`) to the 13-digit key printed on the adapter/unit sticker. Units without a key entry are auto-detected as before. In the Homebridge UI the key is entered by editing the device in the plugin settings; the settings UI keeps this mapping in sync with the device list automatically.
 
 * `debugMode` (boolean):
 If `true`, the plugin will print debugging information to the Homebridge log.

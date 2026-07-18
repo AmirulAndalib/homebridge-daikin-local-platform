@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.4.4 (2026-07-18)
 
+- Moved secure adapter (BRP072C) keys into the device list: editing a device now shows its 13-digit key field whenever the unit needs one (with a *Secure adapter* checkbox for units the scan cannot reach), and adding a discovered secure unit opens the form with the key field focused. The separate keys section — and its error-prone requirement to repeat the IP exactly — is gone; the key follows the device, including when its IP is edited.
+- Existing `climateKeys` entries are matched to their device automatically (bare-IP entries written for an `ip:port` device are repaired to the exact form the plugin looks up); entries matching no device stay visible as *unused key* rows to re-adopt or delete, instead of being dropped silently. `climateKeys` is now also declared in `config.schema.json`.
+- Fixed muted text in the settings UI (device details, help text) being unreadable when Homebridge uses a dark theme.
 - Log the reason when the secure (BRP072C) probe fails, so misconfigured keys are easier to diagnose.
 
 ## 1.4.3 (2026-07-17)
