@@ -17,21 +17,53 @@
   }
 </style>
 
+<!-- Edit-form controls: option rows (title + description + switch), the
+     cooling-only chip and the Home-app mode preview. Self-contained because
+     the Bootstrap version inside the iframe varies with Config UI X; colours
+     lean on currentColor/opacity where possible, with explicit
+     body.dark-mode overrides where not. -->
+<style>
+  .dlp-field-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.65; }
+  .dlp-opts { border: 1px solid #dee2e6; border-radius: 8px; }
+  .dlp-opt { display: flex; gap: 12px; padding: 10px 12px; align-items: flex-start; }
+  .dlp-opt + .dlp-opt { border-top: 1px solid #dee2e6; }
+  body.dark-mode .dlp-opts { border-color: #3e4144; }
+  body.dark-mode .dlp-opt + .dlp-opt { border-top-color: #3e4144; }
+  .dlp-opt-main { flex: 1 1 auto; min-width: 0; }
+  .dlp-opt-title { font-weight: 600; font-size: 13px; }
+  .dlp-opt-desc { font-size: 12px; opacity: 0.7; line-height: 1.5; margin-top: 1px; }
+  .dlp-sw { position: relative; display: inline-block; flex-shrink: 0; margin: 2px 0 0; }
+  .dlp-sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+  .dlp-sw input:disabled { cursor: default; }
+  .dlp-sw .dlp-track { display: block; width: 36px; height: 20px; border-radius: 10px; background: #adb5bd; position: relative; transition: background 0.15s; }
+  .dlp-sw .dlp-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+  .dlp-sw input:checked + .dlp-track { background: #0d6efd; }
+  .dlp-sw input:checked + .dlp-track::after { transform: translateX(16px); }
+  .dlp-sw input:disabled + .dlp-track { opacity: 0.5; }
+  .dlp-sw input:focus-visible + .dlp-track { outline: 2px solid #0d6efd; outline-offset: 2px; }
+  .dlp-chip { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px; padding: 0 9px; margin-left: 8px; vertical-align: 1px; color: #0e7490; border: 1px solid #67c9dd; background: rgba(14, 116, 144, 0.08); }
+  body.dark-mode .dlp-chip { color: #4fd0e8; border-color: #2b7f92; background: rgba(79, 208, 232, 0.1); }
+  .dlp-preview { margin-top: 9px; padding: 8px 10px; background: rgba(0, 0, 0, 0.045); border-radius: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+  body.dark-mode .dlp-preview { background: rgba(255, 255, 255, 0.07); }
+  .dlp-mode-chip { font-size: 12px; font-weight: 600; border: 1px solid #0d6efd; border-radius: 999px; padding: 0 11px; }
+  .dlp-mode-chip.dlp-cut { opacity: 0.45; text-decoration: line-through; border-style: dashed; border-color: currentColor; }
+  .dlp-cap { flex-basis: 100%; font-size: 11.5px; opacity: 0.7; }
+</style>
+
 <!-- 1. Devices: one unified list. Configured units (climateIPs) are enriched
      with what the network scan reports (name/MAC/firmware/secure); scanned
      units not configured yet appear in the same list with an add button.
-     A device's 13-digit BRP072C key (climateKeys) is edited inside the
-     device's own inline edit form — there is no separate key section.
+     Per-device settings live inside the device's own inline edit form as
+     option rows: the 13-digit BRP072C key (climateKeys) and the cooling-only
+     flag (climateCoolingOnly) — there are no separate sections for them.
      The scan runs automatically when the page opens. -->
 <div class="card mb-3">
   <div class="card-body py-2">
     <strong>Devices</strong>
     <p class="text-muted small mt-1 mb-2">
-      The Daikin units this plugin controls. The network is scanned
-      automatically when this page opens; units found on the network appear in
-      the list below. Units marked &#128274; (secure BRP072C adapters, paired
-      with the <em>Daikin Comfort Control</em> app) also need their 13-digit
-      key &mdash; edit the device to enter it.
+      The Daikin units this plugin controls. Units found by the automatic
+      network scan appear below &mdash; add one manually if it lives on
+      another subnet.
     </p>
     <div class="d-flex align-items-center mb-2">
       <button type="button" id="dlpScan" class="btn btn-primary btn-sm" style="margin-right: 8px;">Scan network</button>
@@ -91,8 +123,9 @@
   // secure-adapter key ({ value, key? } plus transient edit-state flags);
   // climateKeys entries that match no device survive in orphanKeys until the
   // user adopts them back or deletes them — never dropped silently.
-  let deviceRows = [];              // [{ value: "<ip[:port]>", key?, editing?, ... }]
+  let deviceRows = [];              // [{ value: "<ip[:port]>", key?, coolOnly?, editing?, ... }]
   let orphanKeys = [];              // [{ ip, key }]
+  let orphanCoolingOnly = [];       // climateCoolingOnly entries matching no device
   let nameValue = defaultName;
   let debugValue = false;
   let lastScan = [];                // devices reported by the last scan
@@ -130,6 +163,20 @@
       delete config.climateKeys;
     }
 
+    // Cooling-only flags, written as the device's exact climateIPs entry
+    // (port included) — the form the platform looks up. Entries matching no
+    // device are preserved verbatim.
+    const coolingOnlyEntries = deviceRows
+      .filter((row) => row.value.trim() !== '' && row.coolOnly === true)
+      .map((row) => row.value.trim())
+      .concat(orphanCoolingOnly);
+
+    if (coolingOnlyEntries.length > 0) {
+      config.climateCoolingOnly = coolingOnlyEntries;
+    } else {
+      delete config.climateCoolingOnly;
+    }
+
     await homebridge.updatePluginConfig(pluginConfig);
   }
 
@@ -159,6 +206,20 @@
     }
   }
 
+  // Same idea for a leftover cooling-only flag: a device removed and later
+  // re-added under the same address gets its flag back.
+  function adoptOrphanCoolingOnly(row) {
+    if (row.coolOnly === true) {
+      return;
+    }
+    const index = orphanCoolingOnly.findIndex((entry) =>
+      entry.trim() === row.value.trim() || bareIp(entry) === bareIp(row.value));
+    if (index !== -1) {
+      row.coolOnly = true;
+      orphanCoolingOnly.splice(index, 1);
+    }
+  }
+
   // Right-aligned action area; inline styles so the alignment does not
   // depend on which Bootstrap version Config UI X injects into the iframe.
   function actionsBox() {
@@ -178,6 +239,12 @@
     const secure = (info && info.secure) || opts.secure === true;
     const title = document.createElement('div');
     title.textContent = (info ? (info.name || '(unnamed)') : fallback) + (secure ? ' \u{1F512}' : '');
+    if (opts.coolOnly) {
+      const chip = document.createElement('span');
+      chip.className = 'dlp-chip';
+      chip.textContent = '❄ cool only';
+      title.appendChild(chip);
+    }
     label.appendChild(title);
 
     const detailText = opts.detail || (info
@@ -207,10 +274,47 @@
     return span;
   }
 
-  // Inline edit form: the IP always, plus the 13-digit key when the unit is
-  // known to be secure (row.editSecure: scan says so, or a key already
-  // exists) or the user marks it as one (row.secureManual — covers secure
-  // units the scan cannot reach, e.g. across subnets).
+  // Builders for the edit form's option rows (title + description + switch)
+  // so every per-device setting reads the same way and a future option is
+  // just one more row.
+  function switchControl(checked, title) {
+    const label = document.createElement('label');
+    label.className = 'dlp-sw';
+    label.title = title;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = checked;
+    const track = document.createElement('span');
+    track.className = 'dlp-track';
+    label.appendChild(input);
+    label.appendChild(track);
+    return { label, input };
+  }
+
+  function optionRow(title, desc) {
+    const opt = document.createElement('div');
+    opt.className = 'dlp-opt';
+    const main = document.createElement('div');
+    main.className = 'dlp-opt-main';
+    const titleLine = document.createElement('div');
+    titleLine.className = 'dlp-opt-title';
+    titleLine.textContent = title;
+    const descLine = document.createElement('div');
+    descLine.className = 'dlp-opt-desc';
+    descLine.textContent = desc;
+    main.appendChild(titleLine);
+    main.appendChild(descLine);
+    opt.appendChild(main);
+    return { opt, main };
+  }
+
+  // Inline edit form: the IP, then one option row per per-device setting.
+  // The 13-digit key appears when the unit is known to be secure
+  // (row.editSecure: scan says so, or a key already exists — then the switch
+  // is locked on) or the user switches it on (row.secureManual — covers
+  // secure units the scan cannot reach, e.g. across subnets). Cooling only
+  // (row.coolOnly) hides Heating and Auto in HomeKit for cool-only models
+  // whose firmware advertises heating (issue #16).
   function renderEditForm(row, index) {
     const form = document.createElement('div');
     form.className = 'border-top py-1';
@@ -230,6 +334,7 @@
         deviceRows.splice(index, 1);
       } else {
         adoptOrphanKey(row);
+        adoptOrphanCoolingOnly(row);
       }
       renderDevices();
       sync();
@@ -241,9 +346,15 @@
       }
     };
 
+    const ipLabel = document.createElement('div');
+    ipLabel.className = 'dlp-field-label';
+    ipLabel.textContent = 'IP address';
+    form.appendChild(ipLabel);
+
     const ipLine = document.createElement('div');
     ipLine.style.display = 'flex';
     ipLine.style.alignItems = 'center';
+    ipLine.style.marginTop = '4px';
 
     const ipInput = document.createElement('input');
     ipInput.type = 'text';
@@ -261,59 +372,100 @@
     ipLine.appendChild(doneButton);
     form.appendChild(ipLine);
 
-    if (!row.editSecure) {
-      const checkLabel = document.createElement('label');
-      checkLabel.className = 'small text-muted';
-      checkLabel.style.display = 'block';
-      checkLabel.style.marginTop = '6px';
-      checkLabel.style.marginBottom = '0';
+    const optionsLabel = document.createElement('div');
+    optionsLabel.className = 'dlp-field-label';
+    optionsLabel.style.margin = '10px 0 4px';
+    optionsLabel.textContent = 'Options';
+    form.appendChild(optionsLabel);
 
-      const check = document.createElement('input');
-      check.type = 'checkbox';
-      check.checked = row.secureManual === true;
-      check.style.marginRight = '6px';
-      check.addEventListener('change', () => {
-        row.secureManual = check.checked;
-        if (check.checked) {
+    const options = document.createElement('div');
+    options.className = 'dlp-opts';
+    form.appendChild(options);
+
+    // Secure adapter
+    const secure = optionRow('Secure adapter',
+      'A BRP072C adapter paired with the Daikin Comfort Control app — needs '
+      + 'the 13-digit key printed on the sticker next to the SSID.');
+    const secureSwitch = switchControl(row.editSecure === true || row.secureManual === true, 'Secure adapter');
+    if (row.editSecure) {
+      // The scan reported the unit secure, or a key already exists — the
+      // plugin needs the key either way, so the switch is locked on.
+      secureSwitch.input.disabled = true;
+    } else {
+      secureSwitch.input.addEventListener('change', () => {
+        row.secureManual = secureSwitch.input.checked;
+        if (secureSwitch.input.checked) {
           row.focusKey = true;
         } else {
           // The key field only appeared this session, so any key in it was
-          // just typed — unchecking discards it.
+          // just typed — switching off discards it.
           delete row.key;
         }
         renderDevices();
         sync();
       });
-      checkLabel.appendChild(check);
-      checkLabel.appendChild(document.createTextNode(
-        'Secure adapter (BRP072C, Daikin Comfort Control app) — needs a 13-digit key'));
-      form.appendChild(checkLabel);
     }
+    secure.opt.appendChild(secureSwitch.label);
+    options.appendChild(secure.opt);
 
     let keyInput = null;
     if (row.editSecure || row.secureManual) {
-      const keyLine = document.createElement('div');
-      keyLine.style.display = 'flex';
-      keyLine.style.alignItems = 'center';
-      keyLine.style.marginTop = '6px';
-
       keyInput = document.createElement('input');
       keyInput.type = 'text';
       keyInput.className = 'form-control form-control-sm';
-      keyInput.style.flex = '1 1 auto';
+      keyInput.style.maxWidth = '260px';
+      keyInput.style.marginTop = '8px';
       keyInput.placeholder = '13-digit key';
       keyInput.value = row.key || '';
       keyInput.addEventListener('input', () => { row.key = keyInput.value; sync(); });
       keyInput.addEventListener('keydown', onEnter);
-      keyLine.appendChild(keyInput);
-      form.appendChild(keyLine);
-
-      const hint = document.createElement('div');
-      hint.className = 'text-muted small';
-      hint.style.marginTop = '2px';
-      hint.textContent = '\u{1F512} The 13-digit key is printed on the sticker on the adapter or unit, next to SSID and MAC.';
-      form.appendChild(hint);
+      secure.main.appendChild(keyInput);
     }
+
+    // Cooling only
+    const cooling = optionRow('Cooling only',
+      'Hide Heating and Auto in the Home app. For cool-only models whose '
+      + 'firmware still reports heating — common in Singapore, Malaysia and India.');
+    const coolingSwitch = switchControl(row.coolOnly === true, 'Cooling only');
+
+    const preview = document.createElement('div');
+    preview.className = 'dlp-preview';
+    const previewIntro = document.createElement('span');
+    previewIntro.textContent = 'Home app will offer:';
+    preview.appendChild(previewIntro);
+    const modeChips = ['Auto', 'Heat', 'Cool'].map((mode) => {
+      const chip = document.createElement('span');
+      chip.className = 'dlp-mode-chip';
+      chip.textContent = mode;
+      preview.appendChild(chip);
+      return chip;
+    });
+    const previewCaption = document.createElement('span');
+    previewCaption.className = 'dlp-cap';
+    preview.appendChild(previewCaption);
+    cooling.main.appendChild(preview);
+
+    const renderPreview = () => {
+      const on = coolingSwitch.input.checked;
+      modeChips[0].classList.toggle('dlp-cut', on);
+      modeChips[1].classList.toggle('dlp-cut', on);
+      previewCaption.textContent = on
+        ? 'Heating and Auto hidden by this setting.'
+        : 'As auto-detected from the unit.';
+    };
+    renderPreview();
+
+    coolingSwitch.input.addEventListener('change', () => {
+      if (coolingSwitch.input.checked) {
+        row.coolOnly = true;
+      } else {
+        delete row.coolOnly;
+      }
+      renderPreview();
+      sync();
+    });
+    cooling.opt.appendChild(coolingSwitch.label);
+    options.appendChild(cooling.opt);
 
     return { form, ipInput, keyInput };
   }
@@ -342,7 +494,7 @@
       line.className = 'd-flex align-items-center border-top py-1';
 
       const info = scanInfoFor(row.value);
-      line.appendChild(deviceLabel(info, row.value, { secure: rowKey(row) !== '' }));
+      line.appendChild(deviceLabel(info, row.value, { secure: rowKey(row) !== '', coolOnly: row.coolOnly === true }));
 
       const actions = actionsBox();
 
@@ -448,6 +600,7 @@
 
     const row = { value: device.ip };
     adoptOrphanKey(row);
+    adoptOrphanCoolingOnly(row);
     deviceRows.push(row);
 
     if (device.secure && rowKey(row) === '') {
@@ -544,6 +697,23 @@
           orphanKeys.push({ ip: ip, key: entry[ip] });
         }
       }
+    }
+  }
+
+  // Attach climateCoolingOnly entries to their device rows — exact entry
+  // first, then bare IP, same repair rules as climateKeys. Leftovers ride
+  // along in orphanCoolingOnly (and are written back verbatim) so a device
+  // removed and re-added later gets its flag back.
+  for (const entry of config.climateCoolingOnly || []) {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      continue;
+    }
+    const row = deviceRows.find((candidate) => candidate.value.trim() === entry.trim() && candidate.coolOnly !== true)
+      || deviceRows.find((candidate) => bareIp(candidate.value) === bareIp(entry) && candidate.coolOnly !== true);
+    if (row) {
+      row.coolOnly = true;
+    } else {
+      orphanCoolingOnly.push(entry);
     }
   }
 

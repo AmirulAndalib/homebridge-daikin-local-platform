@@ -32,6 +32,7 @@ In the settings UI, the device list scans your local network automatically (UDP 
         "climateKeys": [
             {"ipv4-here": "13-digit-key-here"}
         ],
+        "climateCoolingOnly": ["ipv4-here"],
         "debugMode": false,
     }
   ]
@@ -53,6 +54,9 @@ Optional:
 
 * `climateKeys` (array):
 Only needed for secure BRP072C-style adapters (see *Supported devices*). One object per unit mapping its IP address (exactly as written in `climateIPs`) to the 13-digit key printed on the adapter/unit sticker. Units without a key entry are auto-detected as before. In the Homebridge UI the key is entered by editing the device in the plugin settings; the settings UI keeps this mapping in sync with the device list automatically.
+
+* `climateCoolingOnly` (array):
+Units to expose as cooling-only in HomeKit, by IP address exactly as written in `climateIPs`. Heating and Auto are hidden in the Home app — for cool-only models (common in South-East Asia) whose WLAN firmware still reports heating, which the plugin's mode auto-detection cannot see through. In the Homebridge UI this is the *Cooling only* switch in the device's edit form. The option only hides modes, it never adds one.
 
 * `debugMode` (boolean):
 If `true`, the plugin will print debugging information to the Homebridge log.

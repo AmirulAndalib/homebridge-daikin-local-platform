@@ -72,6 +72,18 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
     await this.checkDevices();
   }
 
+  // True when the config marks this unit as cooling-only (climateCoolingOnly).
+  // Entries are matched like climateKeys: the exact climateIPs entry (port
+  // included) first, then by bare IP so hand-edited configs still line up.
+  isCoolingOnly(ip: string | undefined): boolean {
+    if (!ip) {
+      return false;
+    }
+    const bare = (value: string) => value.trim().split(':')[0];
+    return (this.platformConfig.climateCoolingOnly ?? []).some((entry) =>
+      typeof entry === 'string' && (entry.trim() === ip.trim() || bare(entry) === bare(ip)));
+  }
+
   async checkDevices() {
 
     if (!this.platformConfig.climateIPs || this.platformConfig.climateIPs.length === 0) {

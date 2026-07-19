@@ -90,6 +90,17 @@ export default class ClimateAccessory {
     this._supportsHeat = accessory.context.device?.supportsOperationMode(CLIMATE_MODE_HEATING) ?? true;
     this._supportsCool = accessory.context.device?.supportsOperationMode(CLIMATE_MODE_COOLING) ?? true;
 
+    // Config override for cool-only hardware whose firmware advertises the
+    // full heat-pump mode mask (issue #16): hide Heating and Auto no matter
+    // what the unit reports. Only hides — never adds a mode the unit lacks.
+    if (platform.isCoolingOnly(accessory.context.device?.IP)) {
+      this._supportsAuto = false;
+      this._supportsHeat = false;
+      this._supportsCool = true;
+      this.platform.log.info(`Accessory: '${this.accessory.displayName}' is marked cooling-only `
+        + 'in the config - hiding Heating and Auto.');
+    }
+
     const validTargetStates: number[] = [];
     if (this._supportsAuto) {
       validTargetStates.push(this.platform.Characteristic.TargetHeaterCoolerState.AUTO);

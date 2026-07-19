@@ -32,6 +32,13 @@
           }
         }
       },
+      "climateCoolingOnly": {
+        "type": "array",
+        "description": "Units to expose as cooling-only in HomeKit (Heating and Auto hidden), by IP exactly as written in climateIPs. For cool-only models whose firmware still reports heating. Edited from the device list in the settings UI.",
+        "items": {
+          "type": "string"
+        }
+      },
       "debugMode": {
         "title": "Debug Mode",
         "description": "When enabled, debug messages will be written to the log.",
