@@ -41,8 +41,19 @@
   .dlp-sw input:checked + .dlp-track::after { transform: translateX(16px); }
   .dlp-sw input:disabled + .dlp-track { opacity: 0.5; }
   .dlp-sw input:focus-visible + .dlp-track { outline: 2px solid #0d6efd; outline-offset: 2px; }
-  .dlp-chip { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px; padding: 0 9px; margin-left: 8px; vertical-align: 1px; color: #0e7490; border: 1px solid #67c9dd; background: rgba(14, 116, 144, 0.08); }
+  .dlp-chip { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 9px; margin-left: 8px; color: #0e7490; border: 1px solid #67c9dd; background: rgba(14, 116, 144, 0.08); }
   body.dark-mode .dlp-chip { color: #4fd0e8; border-color: #2b7f92; background: rgba(79, 208, 232, 0.1); }
+  .dlp-dev { flex: 1 1 auto; min-width: 0; margin-right: 8px; }
+  .dlp-dev-title { display: flex; align-items: center; min-width: 0; }
+  .dlp-dev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dlp-dev-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dlp-lock { display: inline-flex; flex-shrink: 0; margin-left: 6px; opacity: 0.7; }
+  .dlp-key { max-width: 260px; margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .dlp-invalid-hint { font-size: 12px; margin-top: 4px; color: #dc3545; }
+  body.dark-mode .dlp-invalid-hint { color: #ea868f; }
+  .dlp-badge-btn { cursor: pointer; border: 0; }
+  .dlp-adv-toggle { background: none; border: 0; padding: 0; color: inherit; width: 100%; text-align: left; }
+  .dlp-adv-toggle:focus-visible { outline: 2px solid #0d6efd; outline-offset: 2px; }
   .dlp-preview { margin-top: 9px; padding: 8px 10px; background: rgba(0, 0, 0, 0.045); border-radius: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
   body.dark-mode .dlp-preview { background: rgba(255, 255, 255, 0.07); }
   .dlp-mode-chip { font-size: 12px; font-weight: 600; border: 1px solid #0d6efd; border-radius: 999px; padding: 0 11px; }
@@ -68,7 +79,7 @@
     <div class="d-flex align-items-center mb-2">
       <button type="button" id="dlpScan" class="btn btn-primary btn-sm" style="margin-right: 8px;">Scan network</button>
       <button type="button" id="dlpDeviceAdd" class="btn btn-outline-secondary btn-sm">Add manually</button>
-      <span id="dlpScanStatus" class="text-muted small" style="margin-left: 12px;"></span>
+      <span id="dlpScanStatus" class="text-muted small" style="margin-left: 12px;" aria-live="polite"></span>
     </div>
     <div id="dlpDeviceRows"></div>
   </div>
@@ -77,18 +88,26 @@
 <!-- 2. Advanced: housekeeping nobody touches day-to-day. -->
 <div class="card mb-3">
   <div class="card-body py-2">
-    <a href="#" id="dlpAdvToggle" class="d-flex align-items-center text-decoration-none" style="color: inherit;">
-      <span id="dlpAdvChevron" style="margin-right: 8px;">&#9656;</span>
+    <button type="button" id="dlpAdvToggle" class="dlp-adv-toggle d-flex align-items-center" aria-expanded="false" aria-controls="dlpAdvBody">
+      <span id="dlpAdvChevron" aria-hidden="true" style="margin-right: 8px;">&#9656;</span>
       <strong>Advanced</strong>
-    </a>
+    </button>
     <div id="dlpAdvBody" style="display: none;">
       <div class="form-group mt-2 mb-2">
         <label for="dlpName" class="small mb-1">Plugin name (shown in the Homebridge log)</label>
         <input type="text" id="dlpName" class="form-control form-control-sm" placeholder="Daikin Local Platform">
       </div>
-      <div class="custom-control custom-checkbox form-check mb-1">
-        <input type="checkbox" id="dlpDebug" class="custom-control-input form-check-input">
-        <label for="dlpDebug" class="custom-control-label form-check-label small">Debug mode — print debugging information to the log</label>
+      <div class="dlp-opts mb-1">
+        <div class="dlp-opt">
+          <div class="dlp-opt-main">
+            <div class="dlp-opt-title">Debug mode</div>
+            <div class="dlp-opt-desc">Print debugging information to the Homebridge log.</div>
+          </div>
+          <label class="dlp-sw" title="Debug mode">
+            <input type="checkbox" id="dlpDebug" aria-label="Debug mode">
+            <span class="dlp-track"></span>
+          </label>
+        </div>
       </div>
     </div>
   </div>
@@ -103,10 +122,13 @@
   // Inline SVG icons (Font Awesome availability inside the custom-UI iframe
   // is not guaranteed, so the page stays self-contained).
   const ICONS = {
-    edit: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2 14 4.5 5 13.5l-3 .5.5-3L11.5 2z"/></svg>',
-    done: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 6 12 13.5 4"/></svg>',
-    remove: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 9.5h6.4L12 4M6.5 6.5v5M9.5 6.5v5"/></svg>',
-    add: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 2.5v11M2.5 8h11"/></svg>',
+    edit: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11.5 2 14 4.5 5 13.5l-3 .5.5-3L11.5 2z"/></svg>',
+    done: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 8.5 6 12 13.5 4"/></svg>',
+    cancel: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="m3.5 3.5 9 9M12.5 3.5l-9 9"/></svg>',
+    remove: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 9.5h6.4L12 4M6.5 6.5v5M9.5 6.5v5"/></svg>',
+    add: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 2.5v11M2.5 8h11"/></svg>',
+    lock: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>',
+    snow: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75 2.4 11.25"/></svg>',
   };
 
   function iconButton(icon, className, title) {
@@ -114,13 +136,15 @@
     button.type = 'button';
     button.className = `btn btn-sm ${className} px-2`;
     button.title = title;
+    button.setAttribute('aria-label', title);
     button.style.lineHeight = '1';
     button.innerHTML = ICONS[icon];
     return button;
   }
 
   // Working copies of the fields this page owns. A device row carries its
-  // secure-adapter key ({ value, key? } plus transient edit-state flags);
+  // secure-adapter key ({ value, key? } plus transient edit-state flags;
+  // `orig` snapshots the row when an edit opens so Cancel/Esc can revert);
   // climateKeys entries that match no device survive in orphanKeys until the
   // user adopts them back or deletes them — never dropped silently.
   let deviceRows = [];              // [{ value: "<ip[:port]>", key?, coolOnly?, editing?, ... }]
@@ -133,6 +157,19 @@
 
   const bareIp = (entry) => String(entry).trim().split(':')[0];
   const rowKey = (row) => (row.key || '').trim();
+
+  // Soft validation: warn, never block — the platform accepts anything that
+  // interpolates into a URL (hostnames included), so a hint is enough.
+  const looksLikeIpEntry = (value) => {
+    const match = String(value).trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?::(\d{1,5}))?$/);
+    if (!match) {
+      return false;
+    }
+    const octetsOk = [1, 2, 3, 4].every((i) => Number(match[i]) <= 255);
+    const portOk = match[5] === undefined || (Number(match[5]) >= 1 && Number(match[5]) <= 65535);
+    return octetsOk && portOk;
+  };
+  const looksLikeKey = (value) => /^\d{13}$/.test(String(value).trim());
 
   // ------------------------------------------------------------------
   // Config I/O (read-modify-write; preserves fields we don't own)
@@ -220,6 +257,32 @@
     }
   }
 
+  // The inverse, for removing a device: its key survives as a visible
+  // "unused key" orphan row (keys are precious — the sticker may be on a
+  // unit in the ceiling) and its cooling-only flag rides along invisibly,
+  // both re-adopted if the device comes back. Deleting a key is always its
+  // own explicit action on the orphan row.
+  function stashOrphans(value, key, coolOnly) {
+    const ip = String(value || '').trim();
+    if (ip === '') {
+      return;
+    }
+    if (key) {
+      orphanKeys.push({ ip: ip, key: key });
+    }
+    if (coolOnly) {
+      orphanCoolingOnly.push(ip);
+    }
+  }
+
+  function removeDeviceRow(index) {
+    const row = deviceRows[index];
+    stashOrphans(row.value, rowKey(row), row.coolOnly === true);
+    deviceRows.splice(index, 1);
+    renderDevices();
+    sync();
+  }
+
   // Right-aligned action area; inline styles so the alignment does not
   // depend on which Bootstrap version Config UI X injects into the iframe.
   function actionsBox() {
@@ -233,16 +296,31 @@
 
   function deviceLabel(info, fallback, opts = {}) {
     const label = document.createElement('div');
-    label.style.marginRight = '8px';
-    label.style.minWidth = '0';
+    label.className = 'dlp-dev';
 
     const secure = (info && info.secure) || opts.secure === true;
     const title = document.createElement('div');
-    title.textContent = (info ? (info.name || '(unnamed)') : fallback) + (secure ? ' \u{1F512}' : '');
+    title.className = 'dlp-dev-title';
+
+    const name = document.createElement('span');
+    name.className = 'dlp-dev-name';
+    name.textContent = info ? (info.name || '(unnamed)') : fallback;
+    title.appendChild(name);
+
+    if (secure) {
+      const lock = document.createElement('span');
+      lock.className = 'dlp-lock';
+      lock.title = 'Secure adapter — requires the 13-digit key';
+      lock.setAttribute('role', 'img');
+      lock.setAttribute('aria-label', 'Secure adapter');
+      lock.innerHTML = ICONS.lock;
+      title.appendChild(lock);
+    }
     if (opts.coolOnly) {
       const chip = document.createElement('span');
       chip.className = 'dlp-chip';
-      chip.textContent = '❄ cool only';
+      chip.innerHTML = ICONS.snow;
+      chip.appendChild(document.createTextNode('cool only'));
       title.appendChild(chip);
     }
     label.appendChild(title);
@@ -258,7 +336,7 @@
 
     if (detailText) {
       const detail = document.createElement('div');
-      detail.className = 'text-muted small';
+      detail.className = 'text-muted small dlp-dev-detail';
       detail.textContent = detailText;
       label.appendChild(detail);
     }
@@ -283,6 +361,7 @@
     label.title = title;
     const input = document.createElement('input');
     input.type = 'checkbox';
+    input.setAttribute('aria-label', title);
     input.checked = checked;
     const track = document.createElement('span');
     track.className = 'dlp-track';
@@ -319,18 +398,27 @@
     const form = document.createElement('div');
     form.className = 'border-top py-1';
 
-    const finishEditing = () => {
-      row.value = row.value.trim();
-      row.key = rowKey(row);
-      if (row.key === '') {
-        delete row.key;
-      }
+    const clearEditState = () => {
       delete row.editing;
       delete row.editSecure;
       delete row.secureManual;
       delete row.focus;
       delete row.focusKey;
+      delete row.orig;
+    };
+
+    const finishEditing = () => {
+      const orig = row.orig || {};
+      row.value = row.value.trim();
+      row.key = rowKey(row);
+      if (row.key === '') {
+        delete row.key;
+      }
+      clearEditState();
       if (row.value === '') {
+        // Emptying the IP removes the device; a key it had before this edit
+        // survives as an orphan row under its previous address.
+        stashOrphans(orig.value, (orig.key || '').trim(), orig.coolOnly === true);
         deviceRows.splice(index, 1);
       } else {
         adoptOrphanKey(row);
@@ -340,9 +428,36 @@
       sync();
     };
 
-    const onEnter = (event) => {
+    // Cancel/Esc: put the row back the way it was when the edit opened
+    // (every keystroke synced live, so the snapshot must be written back).
+    const cancelEditing = () => {
+      const orig = row.orig || { value: '' };
+      row.value = orig.value;
+      if (orig.key) {
+        row.key = orig.key;
+      } else {
+        delete row.key;
+      }
+      if (orig.coolOnly) {
+        row.coolOnly = true;
+      } else {
+        delete row.coolOnly;
+      }
+      clearEditState();
+      if (row.value.trim() === '') {
+        deviceRows.splice(index, 1);
+      }
+      renderDevices();
+      sync();
+    };
+
+    const onEditKeys = (event) => {
       if (event.key === 'Enter') {
         finishEditing();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelEditing();
       }
     };
 
@@ -362,15 +477,50 @@
     ipInput.style.flex = '1 1 auto';
     ipInput.style.marginRight = '8px';
     ipInput.placeholder = 'IP address (e.g. 10.1.10.120)';
+    ipInput.setAttribute('aria-label', 'IP address');
     ipInput.value = row.value;
-    ipInput.addEventListener('input', () => { row.value = ipInput.value; sync(); });
-    ipInput.addEventListener('keydown', onEnter);
+
+    const ipHint = document.createElement('div');
+    ipHint.className = 'dlp-invalid-hint';
+    ipHint.style.display = 'none';
+    ipHint.textContent = 'Doesn’t look like an IPv4 address — expected e.g. 10.1.10.120 or 10.1.10.120:8080 (a hostname works too).';
+
+    const validateIp = () => {
+      const bad = ipInput.value.trim() !== '' && !looksLikeIpEntry(ipInput.value);
+      ipInput.classList.toggle('is-invalid', bad);
+      ipInput.setAttribute('aria-invalid', bad ? 'true' : 'false');
+      ipHint.style.display = bad ? '' : 'none';
+    };
+    validateIp();
+
+    ipInput.addEventListener('input', () => { row.value = ipInput.value; validateIp(); sync(); });
+    ipInput.addEventListener('keydown', onEditKeys);
     ipLine.appendChild(ipInput);
 
     const doneButton = iconButton('done', 'btn-outline-success', 'Done');
+    doneButton.style.marginRight = '6px';
     doneButton.addEventListener('click', finishEditing);
     ipLine.appendChild(doneButton);
+
+    const cancelButton = iconButton('cancel', 'btn-outline-secondary', 'Cancel — discard changes');
+    cancelButton.style.marginRight = '6px';
+    cancelButton.addEventListener('click', cancelEditing);
+    ipLine.appendChild(cancelButton);
+
+    const removeEditButton = iconButton('remove', 'btn-outline-danger', 'Remove device');
+    removeEditButton.addEventListener('click', () => {
+      // Remove the device as it was before the edit: half-typed values are
+      // discarded, and a pre-existing key survives as an orphan row.
+      const orig = row.orig || {};
+      stashOrphans(orig.value, (orig.key || '').trim(), orig.coolOnly === true);
+      deviceRows.splice(index, 1);
+      renderDevices();
+      sync();
+    });
+    ipLine.appendChild(removeEditButton);
+
     form.appendChild(ipLine);
+    form.appendChild(ipHint);
 
     const optionsLabel = document.createElement('div');
     optionsLabel.className = 'dlp-field-label';
@@ -412,14 +562,31 @@
     if (row.editSecure || row.secureManual) {
       keyInput = document.createElement('input');
       keyInput.type = 'text';
-      keyInput.className = 'form-control form-control-sm';
-      keyInput.style.maxWidth = '260px';
-      keyInput.style.marginTop = '8px';
+      keyInput.className = 'form-control form-control-sm dlp-key';
       keyInput.placeholder = '13-digit key';
+      keyInput.maxLength = 13;
+      keyInput.inputMode = 'numeric';
+      keyInput.autocomplete = 'off';
+      keyInput.setAttribute('aria-label', '13-digit key');
       keyInput.value = row.key || '';
-      keyInput.addEventListener('input', () => { row.key = keyInput.value; sync(); });
-      keyInput.addEventListener('keydown', onEnter);
+
+      const keyHint = document.createElement('div');
+      keyHint.className = 'dlp-invalid-hint';
+      keyHint.style.display = 'none';
+      keyHint.textContent = 'The key is exactly 13 digits — printed on the sticker next to the SSID.';
+
+      const validateKey = () => {
+        const bad = keyInput.value.trim() !== '' && !looksLikeKey(keyInput.value);
+        keyInput.classList.toggle('is-invalid', bad);
+        keyInput.setAttribute('aria-invalid', bad ? 'true' : 'false');
+        keyHint.style.display = bad ? '' : 'none';
+      };
+      validateKey();
+
+      keyInput.addEventListener('input', () => { row.key = keyInput.value; validateKey(); sync(); });
+      keyInput.addEventListener('keydown', onEditKeys);
       secure.main.appendChild(keyInput);
+      secure.main.appendChild(keyHint);
     }
 
     // Cooling only
@@ -498,8 +665,30 @@
 
       const actions = actionsBox();
 
+      const startEditing = (focusKeyField) => {
+        row.editing = true;
+        row.orig = { value: row.value, key: row.key, coolOnly: row.coolOnly === true };
+        row.editSecure = Boolean(info && info.secure) || rowKey(row) !== '';
+        if (focusKeyField) {
+          row.focusKey = true;
+        } else {
+          row.focus = true;
+        }
+        renderDevices();
+      };
+
       if (info && info.secure && rowKey(row) === '') {
-        actions.appendChild(badge('needs key', 'badge-warning bg-warning text-dark'));
+        // The badge is the thing users try to click — make it work: it opens
+        // the edit form with the key field focused.
+        const needsKey = document.createElement('button');
+        needsKey.type = 'button';
+        needsKey.className = 'badge badge-warning bg-warning text-dark dlp-badge-btn';
+        needsKey.style.marginRight = '6px';
+        needsKey.textContent = 'needs key';
+        needsKey.title = 'Enter the 13-digit key';
+        needsKey.setAttribute('aria-label', 'Needs key — open the edit form');
+        needsKey.addEventListener('click', () => startEditing(true));
+        actions.appendChild(needsKey);
       }
       if (!info && scanDone) {
         actions.appendChild(badge('no reply', 'badge-light bg-light text-dark'));
@@ -507,20 +696,11 @@
 
       const editButton = iconButton('edit', 'btn-outline-secondary', 'Edit device');
       editButton.style.marginRight = '6px';
-      editButton.addEventListener('click', () => {
-        row.editing = true;
-        row.focus = true;
-        row.editSecure = Boolean(info && info.secure) || rowKey(row) !== '';
-        renderDevices();
-      });
+      editButton.addEventListener('click', () => startEditing(false));
       actions.appendChild(editButton);
 
       const removeButton = iconButton('remove', 'btn-outline-danger', 'Remove device');
-      removeButton.addEventListener('click', () => {
-        deviceRows.splice(index, 1);
-        renderDevices();
-        sync();
-      });
+      removeButton.addEventListener('click', () => removeDeviceRow(index));
       actions.appendChild(removeButton);
 
       line.appendChild(actions);
@@ -583,7 +763,7 @@
       const empty = document.createElement('p');
       empty.className = 'text-muted small mb-0';
       empty.textContent = scanDone
-        ? 'No devices yet - none replied to the scan. Add one manually, or check the subnet / Docker bridge network.'
+        ? 'No devices yet — none replied to the scan. Add one manually, or check the subnet / Docker bridge network.'
         : 'No devices configured yet.';
       deviceRowsHost.appendChild(empty);
     }
@@ -609,9 +789,10 @@
       row.editing = true;
       row.editSecure = true;
       row.focusKey = true;
-      homebridge.toast.warning(`${device.name || device.ip} is a secure adapter - enter its 13-digit key, then save.`, 'Key required');
+      row.orig = { value: row.value, key: row.key, coolOnly: row.coolOnly === true };
+      homebridge.toast.warning(`${device.name || device.ip} is a secure adapter — enter its 13-digit key, then save.`, 'Key required');
     } else {
-      homebridge.toast.success(`${device.name || device.ip} added - remember to save.`, 'Device added');
+      homebridge.toast.success(`${device.name || device.ip} added — remember to save.`, 'Device added');
     }
 
     renderDevices();
@@ -619,7 +800,7 @@
   }
 
   deviceAddButton.addEventListener('click', () => {
-    deviceRows.push({ value: '', editing: true, focus: true });
+    deviceRows.push({ value: '', editing: true, focus: true, orig: { value: '' } });
     renderDevices();
   });
 
@@ -630,9 +811,9 @@
       const result = await homebridge.request('/discover');
       lastScan = result.devices || [];
       scanDone = true;
-      scanStatus.textContent = lastScan.length > 0
-        ? `${lastScan.length} device(s) responded`
-        : 'No devices replied';
+      scanStatus.textContent = lastScan.length === 0
+        ? 'No devices replied'
+        : lastScan.length === 1 ? '1 device responded' : `${lastScan.length} devices responded`;
     } catch (e) {
       scanStatus.textContent = 'Scan failed';
       homebridge.toast.error(e.message || String(e), 'Scan failed');
@@ -659,11 +840,11 @@
   const nameInput = document.getElementById('dlpName');
   const debugInput = document.getElementById('dlpDebug');
 
-  advToggle.addEventListener('click', (event) => {
-    event.preventDefault();
+  advToggle.addEventListener('click', () => {
     const expanded = advBody.style.display === 'none';
     advBody.style.display = expanded ? '' : 'none';
     advChevron.innerHTML = expanded ? '&#9662;' : '&#9656;';
+    advToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   });
 
   nameInput.addEventListener('input', () => { nameValue = nameInput.value; sync(); });
