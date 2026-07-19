@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.5 (2026-07-19)
+
+- Added a per-device *Cooling only* option: enable it for cool-only models (common in Singapore, Malaysia and India) whose firmware advertises heating anyway — the Home app then offers just Cool, with Heating and Auto hidden. Mode auto-detection stays the default, and the option only hides modes, never adds one. Toggling it takes effect after a plugin restart; the accessory keeps its rooms, automations and pairing.
+- Redesigned the device edit form in the settings UI into option rows with switches: *Secure adapter* (the 13-digit key field now lives inside the row, locked on when the unit is known to be secure) and the new *Cooling only*, which previews the resulting Home-app mode menu as you toggle it. Cool-only units show a *❄ cool only* chip in the device list.
+- The new `climateCoolingOnly` config entries hold the IP exactly as written in `climateIPs` and are matched like `climateKeys` (exact entry first, then bare IP); entries matching no device are preserved and re-adopted when the device reappears.
+
 ## 1.4.4 (2026-07-18)
 
 - Moved secure adapter (BRP072C) keys into the device list: editing a device now shows its 13-digit key field whenever the unit needs one (with a *Secure adapter* checkbox for units the scan cannot reach), and adding a discovered secure unit opens the form with the key field focused. The separate keys section — and its error-prone requirement to repeat the IP exactly — is gone; the key follows the device, including when its IP is edited.
