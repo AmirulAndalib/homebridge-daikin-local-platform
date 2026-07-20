@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tasict/homebridge-daikin-local-platform/master/branding/icon-128.png" width="96" height="96" alt="">
+</p>
+
 # Homebridge Daikin Local Platform
 
 [![GitHub version](https://img.shields.io/github/package-json/v/tasict/homebridge-daikin-local-platform?label=GitHub)](https://github.com/tasict/homebridge-daikin-local-platform)
