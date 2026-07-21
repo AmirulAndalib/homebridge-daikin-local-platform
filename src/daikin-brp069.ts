@@ -263,7 +263,7 @@ export class DaikinBRP069Device extends DaikinDevice {
   // endpoints 404 — the signature of a secure BRP072C adapter. Overridden to
   // a no-op by DaikinBRP072CDevice, where the message would be misleading.
   protected logSecureAdapterHint(): void {
-    this.log.info(`Daikin: ${this._IP}: the unit answers '/${RESOURCE_BASIC_INFO}' but not '/${RESOURCE_CONTROL_INFO}' over plain HTTP. It looks like a secure BRP072C-style adapter (Daikin Comfort Control app): add its 13-digit key (printed on the adapter/unit sticker) to 'climateKeys' in the plugin settings so the plugin can control it over HTTPS.`);
+    this.log.info(`Daikin: ${this._IP}: the unit answers '/${RESOURCE_BASIC_INFO}' but not '/${RESOURCE_CONTROL_INFO}' over plain HTTP. If the unit answers on HTTPS (port 443), it is a secure BRP072C-style adapter: add its 13-digit key (printed on the adapter sticker) to 'climateKeys' in the plugin settings. If port 443 does not answer, it is a cloud-only unit (e.g. BRP069C4x/C8x, US ATMOSPHERA built-in WiFi) with no local control API, which no LAN-based plugin can support — see the README's 'Cloud-only units' section.`);
   }
 
   protected getValue(resource: string, key: string): string | undefined {
