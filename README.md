@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tasict/homebridge-daikin-local-platform/master/branding/icon-128.png" width="96" height="96" alt="">
+  <img src="https://raw.githubusercontent.com/tasict/homebridge-daikin-local-platform/master/branding/icon-100.png" width="96" height="96" alt="">
 </p>
 
 # Homebridge Daikin Local Platform

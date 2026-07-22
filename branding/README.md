@@ -6,7 +6,7 @@ Icon assets for `homebridge-daikin-local-platform`.
 | --- | --- |
 | `icon.svg` | Primary icon, 512×512. Source of truth. |
 | `icon.png` | 512×512 with transparency — the file to submit to the Homebridge plugin registry. |
-| `icon-128.png` | Small raster for the README header. |
+| `icon-100.png` | Small raster for the README header. |
 | `icon-mono.svg` | Tile-less glyph in `currentColor`, for inline use in the settings UI. |
 
 ## The mark
