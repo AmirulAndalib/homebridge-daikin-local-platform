@@ -51,6 +51,7 @@ In the settings UI, the device list scans your local network automatically (UDP 
         ],
         "climateCoolingOnly": ["ipv4-here"],
         "climateSwingSwitches": ["ipv4-here"],
+        "language": "en",
         "debugMode": false,
     }
   ]
@@ -78,6 +79,9 @@ Units to expose as cooling-only in HomeKit, by IP address exactly as written in 
 
 * `climateSwingSwitches` (array):
 Units that get separate *Vertical Swing* and *Horizontal Swing* switches in HomeKit, by IP address exactly as written in `climateIPs`. Units with swing-capable vanes always get the standard HomeKit swing toggle on the AC tile (on = all supported axes swing, off = all fixed); these extra switches add independent per-axis control, since HomeKit itself has no four-way swing selector. In the Homebridge UI this is the *Swing switches* option in the device's edit form. Axes the unit does not support are never exposed.
+
+* `language` (string):
+Language for the default HomeKit names of the switches and sensors this plugin creates — e.g. *Outdoor Temperature*, *Vertical Swing*, *Horizontal Swing* — which HomeKit does not translate itself. The options are the same language codes as the Homebridge UI language setting (`en`, `de`, `zh-TW`, `ja`, ...), and the plugin settings UI defaults the dropdown to the language your Homebridge UI is displayed in. Defaults are only applied while a service still carries a plugin-default name: anything you renamed in the Home app is never touched, and changing the language later renames only the untouched services. Absent means English.
 
 * `debugMode` (boolean):
 If `true`, the plugin will print debugging information to the Homebridge log.

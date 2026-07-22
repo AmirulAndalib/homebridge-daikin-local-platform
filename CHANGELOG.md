@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 (2026-07-22)
+
+- Added a *HomeKit name language* setting: the default names of the switches and sensors this plugin creates — *Outdoor Temperature*, *Vertical Swing*, *Horizontal Swing* and the fallback accessory name — can now follow any of the 28 Homebridge UI languages, since HomeKit does not translate service names itself. The dropdown (settings UI → *Advanced*) offers the same options as the Homebridge UI language setting and defaults to the language the Homebridge UI is displayed in; in the JSON config it is the `language` field with the same codes (`en`, `de`, `ja`, `zh-TW`, ...; absent means English).
+- The outdoor temperature sensor now takes the translated *Outdoor Temperature* as its default service name.
+- Renames done in the Home app always win: a default name is only applied while the service still carries one of the plugin's own defaults (in any language), so switching languages later renames only services the user never touched. Upgrading alone changes nothing in HomeKit — existing accessories, rooms, automations and names stay exactly as they are until a language is picked.
+
 ## 1.5.0 (2026-07-22)
 
 - Added vane swing control: units with swing-capable vanes now get HomeKit's standard swing toggle on the AC tile (on = every supported axis swings — 3D on units with both; off = vanes fixed). Supported on newer (dsiot) units — where swing is tracked per axis and per operation mode, and turning swing off restores the previously stored fixed-vane position — and on legacy BRP069-era units via `f_dir`, including the split `f_dir_ud`/`f_dir_lr` keys used by Australian Alira X models. Axes the unit does not support are never offered; AirBase ducted units (no controllable vanes) are unaffected.
