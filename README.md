@@ -12,6 +12,15 @@
 ## How it works
 The plugin communicates with your AC units through the local api from devices. This means your units must be set up there and connect to lan before you can use this plugin.
 
+## What you get in HomeKit
+
+Each configured unit appears as one accessory with:
+
+* **Heater Cooler** — power, operation mode (only the modes the unit actually supports; see also `climateCoolingOnly`), target temperature and the current room temperature.
+* **Swing** — the standard HomeKit swing toggle, on units with swing-capable vanes (on = every supported axis swings, off = vanes fixed). Separate per-axis switches are available as an option, see `climateSwingSwitches`.
+* **Fan** — speed steps 0–6: 0 = automatic, 1 = quiet, 2–6 = fan levels 1–5. Turning the fan off selects automatic speed.
+* **Humidity sensor** and **outdoor temperature sensor**, on units that report those readings.
+
 ## Supported devices
 The plugin auto-detects, per IP address, which of the two local protocols the unit speaks — no configuration needed:
 

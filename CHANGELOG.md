@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0 (2026-07-22)
+
+- Added vane swing control: units with swing-capable vanes now get HomeKit's standard swing toggle on the AC tile (on = every supported axis swings — 3D on units with both; off = vanes fixed). Supported on newer (dsiot) units — where swing is tracked per axis and per operation mode, and turning swing off restores the previously stored fixed-vane position — and on legacy BRP069-era units via `f_dir`, including the split `f_dir_ud`/`f_dir_lr` keys used by Australian Alira X models. Axes the unit does not support are never offered; AirBase ducted units (no controllable vanes) are unaffected.
+- Added a per-device *Swing switches* option that exposes separate *Vertical Swing* and *Horizontal Swing* switches, for the mixed combinations the standard toggle cannot express (HomeKit has no four-way swing selector). Configured from the device's edit form in the settings UI — such units show a *swing* chip in the device list — or via the new `climateSwingSwitches` config array, which follows the `climateCoolingOnly` rules (IP exactly as written in `climateIPs`, entries matching no device preserved and re-adopted).
+- The swing switches are named only when they are first created, so renaming them in the Home app survives plugin restarts.
+
 ## 1.4.5 (2026-07-19)
 
 - Added a per-device *Cooling only* option: enable it for cool-only models (common in Singapore, Malaysia and India) whose firmware advertises heating anyway — the Home app then offers just Cool, with Heating and Auto hidden. Mode auto-detection stays the default, and the option only hides modes, never adds one. Toggling it takes effect after a plugin restart; the accessory keeps its rooms, automations and pairing.
