@@ -72,16 +72,27 @@ export default class DaikinPlatform implements DynamicPlatformPlugin {
     await this.checkDevices();
   }
 
-  // True when the config marks this unit as cooling-only (climateCoolingOnly).
-  // Entries are matched like climateKeys: the exact climateIPs entry (port
-  // included) first, then by bare IP so hand-edited configs still line up.
-  isCoolingOnly(ip: string | undefined): boolean {
+  // Per-device config lists hold climateIPs entries; matched like
+  // climateKeys: the exact entry (port included) first, then by bare IP so
+  // hand-edited configs still line up.
+  private configListHas(list: Array<string> | undefined, ip: string | undefined): boolean {
     if (!ip) {
       return false;
     }
     const bare = (value: string) => value.trim().split(':')[0];
-    return (this.platformConfig.climateCoolingOnly ?? []).some((entry) =>
+    return (list ?? []).some((entry) =>
       typeof entry === 'string' && (entry.trim() === ip.trim() || bare(entry) === bare(ip)));
+  }
+
+  // True when the config marks this unit as cooling-only (climateCoolingOnly).
+  isCoolingOnly(ip: string | undefined): boolean {
+    return this.configListHas(this.platformConfig.climateCoolingOnly, ip);
+  }
+
+  // True when the config asks for the per-axis swing switches
+  // (climateSwingSwitches) on this unit.
+  isSwingSwitchesEnabled(ip: string | undefined): boolean {
+    return this.configListHas(this.platformConfig.climateSwingSwitches, ip);
   }
 
   async checkDevices() {

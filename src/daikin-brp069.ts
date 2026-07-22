@@ -421,6 +421,65 @@ export class DaikinBRP069Device extends DaikinDevice {
     return (rate !== undefined ? FAN_SPEED_CODE_BY_F_RATE[rate] : undefined) ?? CLIMATE_FAN_SPEED_AUTO;
   }
 
+  // Vane swing. Most units report the combined `f_dir` (0 = off, 1 = vertical,
+  // 2 = horizontal, 3 = 3D); Australian Alira X units use the split
+  // `f_dir_ud`/`f_dir_lr` keys ('S' = swing, '0' = off) instead. Like pydaikin,
+  // presence of the key in get_control_info is the capability signal — the
+  // combined f_dir cannot tell the axes apart, so it advertises both.
+  public supportsSwingVertical(): boolean {
+    return this.getValue(RESOURCE_CONTROL_INFO, 'f_dir_ud') !== undefined
+      || this.getValue(RESOURCE_CONTROL_INFO, 'f_dir') !== undefined;
+  }
+
+  public supportsSwingHorizontal(): boolean {
+    return this.getValue(RESOURCE_CONTROL_INFO, 'f_dir_lr') !== undefined
+      || this.getValue(RESOURCE_CONTROL_INFO, 'f_dir') !== undefined;
+  }
+
+  public getSwingVertical(): boolean {
+
+    const ud = this.getValue(RESOURCE_CONTROL_INFO, 'f_dir_ud');
+
+    if (ud !== undefined) {
+      return ud === 'S';
+    }
+
+    const dir = this.getValue(RESOURCE_CONTROL_INFO, 'f_dir');
+
+    return dir === '1' || dir === '3';
+  }
+
+  public getSwingHorizontal(): boolean {
+
+    const lr = this.getValue(RESOURCE_CONTROL_INFO, 'f_dir_lr');
+
+    if (lr !== undefined) {
+      return lr === 'S';
+    }
+
+    const dir = this.getValue(RESOURCE_CONTROL_INFO, 'f_dir');
+
+    return dir === '2' || dir === '3';
+  }
+
+  public async setSwing(vertical: boolean, horizontal: boolean): Promise<boolean> {
+
+    if (this.getValue(RESOURCE_CONTROL_INFO, 'f_dir_ud') !== undefined
+      || this.getValue(RESOURCE_CONTROL_INFO, 'f_dir_lr') !== undefined) {
+      return await this.sendControl({
+        'f_dir_ud': vertical ? 'S' : '0',
+        'f_dir_lr': horizontal ? 'S' : '0',
+      });
+    }
+
+    if (this.getValue(RESOURCE_CONTROL_INFO, 'f_dir') === undefined) {
+      this.log.debug(`Daikin - setSwing(${vertical}, ${horizontal}): not supported by '${this._IP}'`);
+      return false;
+    }
+
+    return await this.sendControl({ 'f_dir': String((vertical ? 1 : 0) + (horizontal ? 2 : 0)) });
+  }
+
   public async setPowerStatus(power: boolean): Promise<boolean> {
     // pydaikin keeps the current mode when powering off; some units reject a bare pow=0 otherwise.
     return await this.sendControl({ 'pow': power ? '1' : '0' });

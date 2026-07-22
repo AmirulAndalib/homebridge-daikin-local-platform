@@ -65,8 +65,9 @@
      with what the network scan reports (name/MAC/firmware/secure); scanned
      units not configured yet appear in the same list with an add button.
      Per-device settings live inside the device's own inline edit form as
-     option rows: the 13-digit BRP072C key (climateKeys) and the cooling-only
-     flag (climateCoolingOnly) — there are no separate sections for them.
+     option rows: the 13-digit BRP072C key (climateKeys), the cooling-only
+     flag (climateCoolingOnly) and the swing-switches flag
+     (climateSwingSwitches) — there are no separate sections for them.
      The scan runs automatically when the page opens. -->
 <div class="card mb-3">
   <div class="card-body py-2">
@@ -129,6 +130,7 @@
     add: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 2.5v11M2.5 8h11"/></svg>',
     lock: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>',
     snow: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75 2.4 11.25"/></svg>',
+    swing: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 2v12M6 4l2-2 2 2M6 12l2 2 2-2M2 8h12M4 6 2 8l2 2M12 6l2 2-2 2"/></svg>',
   };
 
   function iconButton(icon, className, title) {
@@ -147,9 +149,10 @@
   // `orig` snapshots the row when an edit opens so Cancel/Esc can revert);
   // climateKeys entries that match no device survive in orphanKeys until the
   // user adopts them back or deletes them — never dropped silently.
-  let deviceRows = [];              // [{ value: "<ip[:port]>", key?, coolOnly?, editing?, ... }]
+  let deviceRows = [];              // [{ value: "<ip[:port]>", key?, coolOnly?, swingSwitches?, editing?, ... }]
   let orphanKeys = [];              // [{ ip, key }]
   let orphanCoolingOnly = [];       // climateCoolingOnly entries matching no device
+  let orphanSwingSwitches = [];     // climateSwingSwitches entries matching no device
   let nameValue = defaultName;
   let debugValue = false;
   let lastScan = [];                // devices reported by the last scan
@@ -214,6 +217,18 @@
       delete config.climateCoolingOnly;
     }
 
+    // Swing-switches flags, same shape and rules as climateCoolingOnly.
+    const swingSwitchesEntries = deviceRows
+      .filter((row) => row.value.trim() !== '' && row.swingSwitches === true)
+      .map((row) => row.value.trim())
+      .concat(orphanSwingSwitches);
+
+    if (swingSwitchesEntries.length > 0) {
+      config.climateSwingSwitches = swingSwitchesEntries;
+    } else {
+      delete config.climateSwingSwitches;
+    }
+
     await homebridge.updatePluginConfig(pluginConfig);
   }
 
@@ -243,26 +258,31 @@
     }
   }
 
-  // Same idea for a leftover cooling-only flag: a device removed and later
-  // re-added under the same address gets its flag back.
-  function adoptOrphanCoolingOnly(row) {
-    if (row.coolOnly === true) {
+  // Same idea for leftover per-device flags: a device removed and later
+  // re-added under the same address gets them back.
+  function adoptOrphanFlag(list, row, flag) {
+    if (row[flag] === true) {
       return;
     }
-    const index = orphanCoolingOnly.findIndex((entry) =>
+    const index = list.findIndex((entry) =>
       entry.trim() === row.value.trim() || bareIp(entry) === bareIp(row.value));
     if (index !== -1) {
-      row.coolOnly = true;
-      orphanCoolingOnly.splice(index, 1);
+      row[flag] = true;
+      list.splice(index, 1);
     }
+  }
+
+  function adoptOrphanFlags(row) {
+    adoptOrphanFlag(orphanCoolingOnly, row, 'coolOnly');
+    adoptOrphanFlag(orphanSwingSwitches, row, 'swingSwitches');
   }
 
   // The inverse, for removing a device: its key survives as a visible
   // "unused key" orphan row (keys are precious — the sticker may be on a
-  // unit in the ceiling) and its cooling-only flag rides along invisibly,
-  // both re-adopted if the device comes back. Deleting a key is always its
-  // own explicit action on the orphan row.
-  function stashOrphans(value, key, coolOnly) {
+  // unit in the ceiling) and its cooling-only / swing-switches flags ride
+  // along invisibly, all re-adopted if the device comes back. Deleting a key
+  // is always its own explicit action on the orphan row.
+  function stashOrphans(value, key, coolOnly, swingSwitches) {
     const ip = String(value || '').trim();
     if (ip === '') {
       return;
@@ -273,11 +293,14 @@
     if (coolOnly) {
       orphanCoolingOnly.push(ip);
     }
+    if (swingSwitches) {
+      orphanSwingSwitches.push(ip);
+    }
   }
 
   function removeDeviceRow(index) {
     const row = deviceRows[index];
-    stashOrphans(row.value, rowKey(row), row.coolOnly === true);
+    stashOrphans(row.value, rowKey(row), row.coolOnly === true, row.swingSwitches === true);
     deviceRows.splice(index, 1);
     renderDevices();
     sync();
@@ -321,6 +344,13 @@
       chip.className = 'dlp-chip';
       chip.innerHTML = ICONS.snow;
       chip.appendChild(document.createTextNode('cool only'));
+      title.appendChild(chip);
+    }
+    if (opts.swingSwitches) {
+      const chip = document.createElement('span');
+      chip.className = 'dlp-chip';
+      chip.innerHTML = ICONS.swing;
+      chip.appendChild(document.createTextNode('swing'));
       title.appendChild(chip);
     }
     label.appendChild(title);
@@ -393,7 +423,9 @@
   // is locked on) or the user switches it on (row.secureManual — covers
   // secure units the scan cannot reach, e.g. across subnets). Cooling only
   // (row.coolOnly) hides Heating and Auto in HomeKit for cool-only models
-  // whose firmware advertises heating (issue #16).
+  // whose firmware advertises heating (issue #16). Swing switches
+  // (row.swingSwitches) adds the per-axis Vertical/Horizontal Swing switches
+  // in HomeKit on top of the standard swing toggle.
   function renderEditForm(row, index) {
     const form = document.createElement('div');
     form.className = 'border-top py-1';
@@ -418,11 +450,11 @@
       if (row.value === '') {
         // Emptying the IP removes the device; a key it had before this edit
         // survives as an orphan row under its previous address.
-        stashOrphans(orig.value, (orig.key || '').trim(), orig.coolOnly === true);
+        stashOrphans(orig.value, (orig.key || '').trim(), orig.coolOnly === true, orig.swingSwitches === true);
         deviceRows.splice(index, 1);
       } else {
         adoptOrphanKey(row);
-        adoptOrphanCoolingOnly(row);
+        adoptOrphanFlags(row);
       }
       renderDevices();
       sync();
@@ -442,6 +474,11 @@
         row.coolOnly = true;
       } else {
         delete row.coolOnly;
+      }
+      if (orig.swingSwitches) {
+        row.swingSwitches = true;
+      } else {
+        delete row.swingSwitches;
       }
       clearEditState();
       if (row.value.trim() === '') {
@@ -512,7 +549,7 @@
       // Remove the device as it was before the edit: half-typed values are
       // discarded, and a pre-existing key survives as an orphan row.
       const orig = row.orig || {};
-      stashOrphans(orig.value, (orig.key || '').trim(), orig.coolOnly === true);
+      stashOrphans(orig.value, (orig.key || '').trim(), orig.coolOnly === true, orig.swingSwitches === true);
       deviceRows.splice(index, 1);
       renderDevices();
       sync();
@@ -634,6 +671,23 @@
     cooling.opt.appendChild(coolingSwitch.label);
     options.appendChild(cooling.opt);
 
+    // Swing switches
+    const swing = optionRow('Swing switches',
+      'Add separate Vertical Swing and Horizontal Swing switches in the Home '
+      + 'app. The standard swing toggle (all vane axes at once) is always '
+      + 'there on units that support swing.');
+    const swingSwitch = switchControl(row.swingSwitches === true, 'Swing switches');
+    swingSwitch.input.addEventListener('change', () => {
+      if (swingSwitch.input.checked) {
+        row.swingSwitches = true;
+      } else {
+        delete row.swingSwitches;
+      }
+      sync();
+    });
+    swing.opt.appendChild(swingSwitch.label);
+    options.appendChild(swing.opt);
+
     return { form, ipInput, keyInput };
   }
 
@@ -661,13 +715,17 @@
       line.className = 'd-flex align-items-center border-top py-1';
 
       const info = scanInfoFor(row.value);
-      line.appendChild(deviceLabel(info, row.value, { secure: rowKey(row) !== '', coolOnly: row.coolOnly === true }));
+      line.appendChild(deviceLabel(info, row.value, {
+        secure: rowKey(row) !== '',
+        coolOnly: row.coolOnly === true,
+        swingSwitches: row.swingSwitches === true,
+      }));
 
       const actions = actionsBox();
 
       const startEditing = (focusKeyField) => {
         row.editing = true;
-        row.orig = { value: row.value, key: row.key, coolOnly: row.coolOnly === true };
+        row.orig = { value: row.value, key: row.key, coolOnly: row.coolOnly === true, swingSwitches: row.swingSwitches === true };
         row.editSecure = Boolean(info && info.secure) || rowKey(row) !== '';
         if (focusKeyField) {
           row.focusKey = true;
@@ -780,7 +838,7 @@
 
     const row = { value: device.ip };
     adoptOrphanKey(row);
-    adoptOrphanCoolingOnly(row);
+    adoptOrphanFlags(row);
     deviceRows.push(row);
 
     if (device.secure && rowKey(row) === '') {
@@ -789,7 +847,7 @@
       row.editing = true;
       row.editSecure = true;
       row.focusKey = true;
-      row.orig = { value: row.value, key: row.key, coolOnly: row.coolOnly === true };
+      row.orig = { value: row.value, key: row.key, coolOnly: row.coolOnly === true, swingSwitches: row.swingSwitches === true };
       homebridge.toast.warning(`${device.name || device.ip} is a secure adapter — enter its 13-digit key, then save.`, 'Key required');
     } else {
       homebridge.toast.success(`${device.name || device.ip} added — remember to save.`, 'Device added');
@@ -881,22 +939,26 @@
     }
   }
 
-  // Attach climateCoolingOnly entries to their device rows — exact entry
-  // first, then bare IP, same repair rules as climateKeys. Leftovers ride
-  // along in orphanCoolingOnly (and are written back verbatim) so a device
-  // removed and re-added later gets its flag back.
-  for (const entry of config.climateCoolingOnly || []) {
-    if (typeof entry !== 'string' || entry.trim() === '') {
-      continue;
+  // Attach climateCoolingOnly / climateSwingSwitches entries to their device
+  // rows — exact entry first, then bare IP, same repair rules as climateKeys.
+  // Leftovers ride along in the orphan lists (and are written back verbatim)
+  // so a device removed and re-added later gets its flags back.
+  const loadFlagList = (entries, flag, orphans) => {
+    for (const entry of entries || []) {
+      if (typeof entry !== 'string' || entry.trim() === '') {
+        continue;
+      }
+      const row = deviceRows.find((candidate) => candidate.value.trim() === entry.trim() && candidate[flag] !== true)
+        || deviceRows.find((candidate) => bareIp(candidate.value) === bareIp(entry) && candidate[flag] !== true);
+      if (row) {
+        row[flag] = true;
+      } else {
+        orphans.push(entry);
+      }
     }
-    const row = deviceRows.find((candidate) => candidate.value.trim() === entry.trim() && candidate.coolOnly !== true)
-      || deviceRows.find((candidate) => bareIp(candidate.value) === bareIp(entry) && candidate.coolOnly !== true);
-    if (row) {
-      row.coolOnly = true;
-    } else {
-      orphanCoolingOnly.push(entry);
-    }
-  }
+  };
+  loadFlagList(config.climateCoolingOnly, 'coolOnly', orphanCoolingOnly);
+  loadFlagList(config.climateSwingSwitches, 'swingSwitches', orphanSwingSwitches);
 
   nameValue = typeof config.name === 'string' && config.name !== '' ? config.name : defaultName;
   debugValue = config.debugMode === true;

@@ -235,6 +235,31 @@ export abstract class DaikinDevice {
     return true;
   }
 
+  // Vane swing, one boolean per axis. Not every unit has both axes (ducted
+  // units have neither), so the accessory layer checks supportsSwing* before
+  // exposing the matching HomeKit controls. setSwing sets both axes in one
+  // device command; unsupported axes are ignored.
+  public supportsSwingVertical(): boolean {
+    return false;
+  }
+
+  public supportsSwingHorizontal(): boolean {
+    return false;
+  }
+
+  public getSwingVertical(): boolean {
+    return false;
+  }
+
+  public getSwingHorizontal(): boolean {
+    return false;
+  }
+
+  public async setSwing(vertical: boolean, horizontal: boolean): Promise<boolean> {
+    this.log.debug(`Daikin - setSwing(${vertical}, ${horizontal}): not supported by '${this._IP}'`);
+    return false;
+  }
+
   // Optional features not available on every protocol; subclasses override.
   public getMotionDetection(): boolean {
     return false;

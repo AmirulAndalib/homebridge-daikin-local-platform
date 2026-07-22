@@ -41,6 +41,7 @@ In the settings UI, the device list scans your local network automatically (UDP 
             {"ipv4-here": "13-digit-key-here"}
         ],
         "climateCoolingOnly": ["ipv4-here"],
+        "climateSwingSwitches": ["ipv4-here"],
         "debugMode": false,
     }
   ]
@@ -65,6 +66,9 @@ Only needed for secure BRP072C-style adapters (see *Supported devices*). One obj
 
 * `climateCoolingOnly` (array):
 Units to expose as cooling-only in HomeKit, by IP address exactly as written in `climateIPs`. Heating and Auto are hidden in the Home app — for cool-only models (common in South-East Asia) whose WLAN firmware still reports heating, which the plugin's mode auto-detection cannot see through. In the Homebridge UI this is the *Cooling only* switch in the device's edit form. The option only hides modes, it never adds one.
+
+* `climateSwingSwitches` (array):
+Units that get separate *Vertical Swing* and *Horizontal Swing* switches in HomeKit, by IP address exactly as written in `climateIPs`. Units with swing-capable vanes always get the standard HomeKit swing toggle on the AC tile (on = all supported axes swing, off = all fixed); these extra switches add independent per-axis control, since HomeKit itself has no four-way swing selector. In the Homebridge UI this is the *Swing switches* option in the device's edit form. Axes the unit does not support are never exposed.
 
 * `debugMode` (boolean):
 If `true`, the plugin will print debugging information to the Homebridge log.

@@ -11,6 +11,9 @@ export interface DaikinPlatformConfig extends PlatformConfig {
   // (Heating and Auto hidden) — an override for cool-only hardware whose
   // firmware advertises the full heat-pump mode mask.
   climateCoolingOnly?: Array<string>;
+  // climateIPs entries of units that get the per-axis Vertical/Horizontal
+  // Swing switches in addition to the HeaterCooler's binary SwingMode.
+  climateSwingSwitches?: Array<string>;
   debugMode: boolean;
 }
 

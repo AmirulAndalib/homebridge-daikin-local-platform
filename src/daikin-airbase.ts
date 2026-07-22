@@ -100,6 +100,17 @@ export class DaikinAirBaseDevice extends DaikinBRP069Device {
     return Number.isFinite(this.getNumber(RESOURCE_SENSOR_INFO, 'otemp'));
   }
 
+  // Ducted systems have no controllable vanes: the firmware still echoes an
+  // f_dir field (always 0), so the inherited presence check would wrongly
+  // advertise swing. pydaikin's DaikinAirBase does not support swing either.
+  public supportsSwingVertical(): boolean {
+    return false;
+  }
+
+  public supportsSwingHorizontal(): boolean {
+    return false;
+  }
+
   // Fan-speed auto lives in the separate f_auto flag, not in f_rate.
   public getFanSpeed(): string {
 

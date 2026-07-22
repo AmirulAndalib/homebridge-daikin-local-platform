@@ -48,6 +48,22 @@ const FAN_SPEED_PN_BY_MODE: Record<string, string> = {
 };
 const FAN_SPEED_PN_DEFAULT = 'p_09';
 
+// Vane swing lives under mode-dependent `pn` keys inside e_1002/e_3001, one
+// per axis (mirrors pydaikin's BRP084 swing_settings). The value is a multi-
+// byte hex string whose first byte selects swing ('0F') vs a fixed position
+// ('00' + stored position in the remaining bytes); field length varies per
+// axis and firmware (observed 4 bytes vertical / 3 bytes horizontal), so
+// writes must preserve the tail. Modes not listed fall back to cooling.
+const SWING_PN_BY_MODE: Record<string, { vertical: string; horizontal: string }> = {
+  [CLIMATE_MODE_COOLING]: { vertical: 'p_05', horizontal: 'p_06' },
+  [CLIMATE_MODE_HEATING]: { vertical: 'p_07', horizontal: 'p_08' },
+  [CLIMATE_MODE_AUTO]: { vertical: 'p_20', horizontal: 'p_21' },
+  [CLIMATE_MODE_DEHUMIDIFY]: { vertical: 'p_22', horizontal: 'p_23' },
+  [CLIMATE_MODE_FAN]: { vertical: 'p_24', horizontal: 'p_25' },
+};
+const SWING_ON_BYTE = '0F';
+const SWING_OFF_BYTE = '00';
+
 const COMMAND_PROBE = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"}]}';
 const COMMAND_QUERY = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_d?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_f?filter=pv"},{"op":2,"to":"/dsiot/edge.dev_i?filter=pv"},{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status?filter=pv"}]}';
 const COMMAND_QUERY_WITH_MD = '{"requests":[{"op":2,"to":"/dsiot/edge.adp_i?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_d?filter=pv"},{"op":2,"to":"/dsiot/edge.adp_f?filter=pv"},{"op":2,"to":"/dsiot/edge.dev_i?filter=pv"},{"op":2,"to":"/dsiot/edge/adr_0100.dgc_status"},{"op":2,"to":"/dsiot/edge/adr_0200.dgc_status"}]}';
@@ -280,6 +296,106 @@ export class DaikinDsiotDevice extends DaikinDevice {
 
     return this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + pn);
 
+  }
+
+  // The property metadata `mx` is a little-endian bitmask of the accepted
+  // value codes (bit n set = first-byte value n accepted), of whatever byte
+  // length the property has. Treat missing/unparseable metadata as accepted,
+  // matching supportsOperationMode.
+  private mxAllowsCode(mx: unknown, code: number): boolean {
+
+    if (typeof mx !== 'string' || mx.length < 2 || mx.length % 2 !== 0) {
+      return true;
+    }
+
+    const byteIndex = code >> 3;
+
+    if ((byteIndex + 1) * 2 > mx.length) {
+      return false;
+    }
+
+    const byte = parseInt(mx.substring(byteIndex * 2, byteIndex * 2 + 2), 16);
+
+    if (Number.isNaN(byte)) {
+      return true;
+    }
+
+    return (byte & (1 << (code & 7))) !== 0;
+  }
+
+  private swingPn(axis: 'vertical' | 'horizontal'): string {
+
+    const mode = this.getOperationMode();
+
+    return (SWING_PN_BY_MODE[mode] ?? SWING_PN_BY_MODE[CLIMATE_MODE_COOLING])[axis];
+  }
+
+  // An axis is supported when the current mode's swing property exists and
+  // its metadata accepts the swing code (0x0F). Units without horizontal
+  // vanes simply lack the property (or its swing bit).
+  private supportsSwingAxis(axis: 'vertical' | 'horizontal'): boolean {
+
+    const element = this.extractObject(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + this.swingPn(axis));
+
+    if (!element) {
+      return false;
+    }
+
+    const md = element['md'];
+
+    return this.mxAllowsCode(md ? md['mx'] : undefined, parseInt(SWING_ON_BYTE, 16));
+  }
+
+  public supportsSwingVertical(): boolean {
+    return this.supportsSwingAxis('vertical');
+  }
+
+  public supportsSwingHorizontal(): boolean {
+    return this.supportsSwingAxis('horizontal');
+  }
+
+  private getSwingAxis(axis: 'vertical' | 'horizontal'): boolean {
+
+    const pv = this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + this.swingPn(axis));
+
+    return typeof pv === 'string' && pv.substring(0, 2).toUpperCase() === SWING_ON_BYTE;
+  }
+
+  public getSwingVertical(): boolean {
+    return this.getSwingAxis('vertical');
+  }
+
+  public getSwingHorizontal(): boolean {
+    return this.getSwingAxis('horizontal');
+  }
+
+  public async setSwing(vertical: boolean, horizontal: boolean): Promise<boolean> {
+
+    const settings: object[] = [];
+    const axes: ['vertical' | 'horizontal', boolean][] = [['vertical', vertical], ['horizontal', horizontal]];
+
+    for (const [axis, on] of axes) {
+
+      if (!this.supportsSwingAxis(axis)) {
+        continue;
+      }
+
+      const pn = this.swingPn(axis);
+      const current = this.extractValue(this._Response, '/dsiot/edge/adr_0100.dgc_status', 'e_1002/e_3001/' + pn);
+      // Keep the stored fixed-vane position in the tail bytes and only flip
+      // the first (swing selector) byte.
+      const tail = typeof current === 'string' && current.length > 2 ? current.substring(2) : '0000';
+
+      settings.push({ 'pn': pn, 'pv': (on ? SWING_ON_BYTE : SWING_OFF_BYTE) + tail });
+    }
+
+    if (settings.length === 0) {
+      this.log.debug(`Daikin - setSwing(${vertical}, ${horizontal}): no swing-capable axis on '${this._IP}'`);
+      return false;
+    }
+
+    const command = [{"pn": "e_3003", "pch": [{"pn": "p_2D", "pv": CLIMATE_OPERATE_SETTING}]}, {"pn": "e_3001", "pch": settings}];
+    return await this.sendCommand(command);
   }
 
   public getMotionDetection(): boolean {

@@ -30,6 +30,8 @@ export default class ClimateAccessory {
   private _supportsCool = true;
   private _supportsHumidity = true;
   private _supportsOutdoorTemperature = true;
+  private _supportsSwingVertical = false;
+  private _supportsSwingHorizontal = false;
 
   constructor(
     private readonly platform: DaikinPlatform,
@@ -185,6 +187,68 @@ export default class ClimateAccessory {
     })
     .onGet(this.getRotationSpeed.bind(this))
     .onSet(this.setRotationSpeed.bind(this));
+
+    ////
+    // Vane swing. The HeaterCooler's binary SwingMode (native Home-app
+    // "Oscillate" toggle, Siri-capable) is exposed whenever the unit swings
+    // on at least one axis: enabled = every supported axis on (3D),
+    // disabled = all off. The optional per-axis Switch services
+    // (climateSwingSwitches config) add the remaining combinations.
+    this._supportsSwingVertical = accessory.context.device?.supportsSwingVertical() ?? false;
+    this._supportsSwingHorizontal = accessory.context.device?.supportsSwingHorizontal() ?? false;
+
+    if (this._supportsSwingVertical || this._supportsSwingHorizontal) {
+      this.services['Climate']
+        .getCharacteristic(this.platform.Characteristic.SwingMode)
+        .onGet(this.getSwingMode.bind(this))
+        .onSet(this.setSwingMode.bind(this));
+    } else if (this.services['Climate'].testCharacteristic(this.platform.Characteristic.SwingMode)) {
+      // Drop the characteristic left on an accessory cached before capability detection.
+      this.services['Climate'].removeCharacteristic(
+        this.services['Climate'].getCharacteristic(this.platform.Characteristic.SwingMode));
+    }
+
+    const swingSwitches: { key: string; subtype: string; name: string; supported: boolean;
+      onGet: () => Promise<CharacteristicValue>; onSet: (value: CharacteristicValue) => Promise<void>; }[] = [
+      { key: 'VerticalSwing', subtype: 'swing-vertical', name: 'Vertical Swing',
+        supported: this._supportsSwingVertical,
+        onGet: this.getVerticalSwingSwitch.bind(this), onSet: this.setVerticalSwingSwitch.bind(this) },
+      { key: 'HorizontalSwing', subtype: 'swing-horizontal', name: 'Horizontal Swing',
+        supported: this._supportsSwingHorizontal,
+        onGet: this.getHorizontalSwingSwitch.bind(this), onSet: this.setHorizontalSwingSwitch.bind(this) },
+    ];
+
+    const exposeSwingSwitches = platform.isSwingSwitchesEnabled(accessory.context.device?.IP);
+
+    for (const swingSwitch of swingSwitches) {
+
+      if (exposeSwingSwitches && swingSwitch.supported) {
+        let service = this.accessory.getServiceById(this.platform.Service.Switch, swingSwitch.subtype);
+
+        if (!service) {
+          // Name the switch only on creation: renames done in the Home app
+          // land in ConfiguredName, and re-setting it on every restart would
+          // wipe them out. HomeKit has no name localization — English default,
+          // the user renames it in the Home app if they want another language.
+          service = this.accessory.addService(this.platform.Service.Switch, swingSwitch.name, swingSwitch.subtype);
+          service.setCharacteristic(this.platform.Characteristic.Name, swingSwitch.name);
+          service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+          service.setCharacteristic(this.platform.Characteristic.ConfiguredName, swingSwitch.name);
+        }
+
+        this.services[swingSwitch.key] = service;
+        this.services[swingSwitch.key].getCharacteristic(this.platform.Characteristic.On)
+          .onGet(swingSwitch.onGet)
+          .onSet(swingSwitch.onSet);
+      } else {
+        // Drop the service when the option is switched off or the axis is
+        // not supported (stale cached accessory).
+        const stale = this.accessory.getServiceById(this.platform.Service.Switch, swingSwitch.subtype);
+        if (stale) {
+          this.accessory.removeService(stale);
+        }
+      }
+    }
 
     /*
     //
@@ -353,7 +417,60 @@ export default class ClimateAccessory {
 
     this.assertCommand(await this.accessory.context.device.setFanSpeed(entry.code));
   }
-  
+
+  // Swing on any supported axis shows as "swinging"; enabling turns every
+  // supported axis on (3D on units with both), disabling turns all off.
+  private isSwinging(): boolean {
+    const device = this.accessory.context.device;
+    return (this._supportsSwingVertical && device.getSwingVertical())
+      || (this._supportsSwingHorizontal && device.getSwingHorizontal());
+  }
+
+  async getSwingMode(): Promise<CharacteristicValue> {
+    this.platform.log.debug(`Accessory: getSwingMode() for device '${this.accessory.displayName}'`);
+
+    return this.isSwinging()
+      ? this.platform.Characteristic.SwingMode.SWING_ENABLED
+      : this.platform.Characteristic.SwingMode.SWING_DISABLED;
+  }
+
+  async setSwingMode(value: CharacteristicValue) {
+    this.platform.log.debug(`Accessory: setSwingMode() for device '${this.accessory.displayName}'`);
+
+    const enable = value === this.platform.Characteristic.SwingMode.SWING_ENABLED;
+    this.assertCommand(await this.accessory.context.device.setSwing(
+      enable && this._supportsSwingVertical,
+      enable && this._supportsSwingHorizontal));
+  }
+
+  async getVerticalSwingSwitch(): Promise<CharacteristicValue> {
+    this.platform.log.debug(`Accessory: getVerticalSwingSwitch() for device '${this.accessory.displayName}'`);
+
+    return this.accessory.context.device.getSwingVertical();
+  }
+
+  async setVerticalSwingSwitch(value: CharacteristicValue) {
+    this.platform.log.debug(`Accessory: setVerticalSwingSwitch() for device '${this.accessory.displayName}'`);
+
+    this.assertCommand(await this.accessory.context.device.setSwing(
+      value === true,
+      this.accessory.context.device.getSwingHorizontal()));
+  }
+
+  async getHorizontalSwingSwitch(): Promise<CharacteristicValue> {
+    this.platform.log.debug(`Accessory: getHorizontalSwingSwitch() for device '${this.accessory.displayName}'`);
+
+    return this.accessory.context.device.getSwingHorizontal();
+  }
+
+  async setHorizontalSwingSwitch(value: CharacteristicValue) {
+    this.platform.log.debug(`Accessory: setHorizontalSwingSwitch() for device '${this.accessory.displayName}'`);
+
+    this.assertCommand(await this.accessory.context.device.setSwing(
+      this.accessory.context.device.getSwingVertical(),
+      value === true));
+  }
+
   async getCurrentRelativeHumidity():Promise<CharacteristicValue> {
 
     try{
@@ -587,6 +704,24 @@ export default class ClimateAccessory {
       if (this._supportsOutdoorTemperature && Number.isFinite(outdoorTemp)) {
         this.services['OutdoorTemperatureSensor']
           .updateCharacteristic(this.platform.Characteristic.CurrentTemperature, outdoorTemp);
+      }
+
+      // updateCharacteristic would re-add the removed SwingMode, so only push
+      // when at least one axis is exposed; the per-axis switches exist only
+      // when configured (see constructor).
+      if (this._supportsSwingVertical || this._supportsSwingHorizontal) {
+        this.services['Climate'].updateCharacteristic(this.platform.Characteristic.SwingMode,
+          this.isSwinging()
+            ? this.platform.Characteristic.SwingMode.SWING_ENABLED
+            : this.platform.Characteristic.SwingMode.SWING_DISABLED);
+      }
+      if (this.services['VerticalSwing']) {
+        this.services['VerticalSwing'].updateCharacteristic(this.platform.Characteristic.On,
+          this.accessory.context.device.getSwingVertical());
+      }
+      if (this.services['HorizontalSwing']) {
+        this.services['HorizontalSwing'].updateCharacteristic(this.platform.Characteristic.On,
+          this.accessory.context.device.getSwingHorizontal());
       }
 
       //this.services['MotionSensor'].updateCharacteristic(this.platform.Characteristic.On, this.accessory.context.device.getMotionDetection());

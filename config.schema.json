@@ -39,6 +39,13 @@
           "type": "string"
         }
       },
+      "climateSwingSwitches": {
+        "type": "array",
+        "description": "Units that get separate Vertical Swing and Horizontal Swing switches in HomeKit (in addition to the standard swing toggle), by IP exactly as written in climateIPs. Edited from the device list in the settings UI.",
+        "items": {
+          "type": "string"
+        }
+      },
       "debugMode": {
         "title": "Debug Mode",
         "description": "When enabled, debug messages will be written to the log.",
