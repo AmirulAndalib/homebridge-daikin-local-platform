@@ -46,6 +46,42 @@
           "type": "string"
         }
       },
+      "language": {
+        "title": "HomeKit Name Language",
+        "description": "Language for the default HomeKit names of the switches and sensors this plugin creates (e.g. Outdoor Temperature, Vertical Swing, Horizontal Swing). Same options as the Homebridge UI language; the settings UI defaults it to the language selected there. Names changed in the Home app are never touched.",
+        "type": "string",
+        "default": "en",
+        "oneOf": [
+          { "title": "Bulgarian (bg)", "enum": ["bg"] },
+          { "title": "Catalan (ca)", "enum": ["ca"] },
+          { "title": "Chinese - Simplified (zh-CN)", "enum": ["zh-CN"] },
+          { "title": "Chinese - Traditional (zh-TW)", "enum": ["zh-TW"] },
+          { "title": "Czech (cs)", "enum": ["cs"] },
+          { "title": "Dutch (nl)", "enum": ["nl"] },
+          { "title": "English (en)", "enum": ["en"] },
+          { "title": "Finnish (fi)", "enum": ["fi"] },
+          { "title": "French (fr)", "enum": ["fr"] },
+          { "title": "German (de)", "enum": ["de"] },
+          { "title": "Hebrew (he)", "enum": ["he"] },
+          { "title": "Hungarian (hu)", "enum": ["hu"] },
+          { "title": "Indonesian (id)", "enum": ["id"] },
+          { "title": "Italian (it)", "enum": ["it"] },
+          { "title": "Japanese (ja)", "enum": ["ja"] },
+          { "title": "Korean (ko)", "enum": ["ko"] },
+          { "title": "Macedonian (mk)", "enum": ["mk"] },
+          { "title": "Norwegian (no)", "enum": ["no"] },
+          { "title": "Polish (pl)", "enum": ["pl"] },
+          { "title": "Portuguese (Brazil)", "enum": ["pt-BR"] },
+          { "title": "Portuguese (Portugal)", "enum": ["pt"] },
+          { "title": "Russian (ru)", "enum": ["ru"] },
+          { "title": "Slovenian (sl)", "enum": ["sl"] },
+          { "title": "Spanish (es)", "enum": ["es"] },
+          { "title": "Swedish (sv)", "enum": ["sv"] },
+          { "title": "Thai (th)", "enum": ["th"] },
+          { "title": "Turkish (tr)", "enum": ["tr"] },
+          { "title": "Ukrainian (uk)", "enum": ["uk"] }
+        ]
+      },
       "debugMode": {
         "title": "Debug Mode",
         "description": "When enabled, debug messages will be written to the log.",

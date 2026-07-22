@@ -98,6 +98,17 @@
         <label for="dlpName" class="small mb-1">Plugin name (shown in the Homebridge log)</label>
         <input type="text" id="dlpName" class="form-control form-control-sm" placeholder="Daikin Local Platform">
       </div>
+      <div class="form-group mb-2">
+        <label for="dlpLanguage" class="small mb-1">HomeKit name language</label>
+        <select id="dlpLanguage" class="form-select form-select-sm form-control form-control-sm"></select>
+        <div class="text-muted small mt-1">
+          Language for the default names of the switches and sensors this plugin
+          creates in HomeKit (e.g. Outdoor Temperature, Vertical Swing) &mdash;
+          HomeKit does not translate them itself. Follows the Homebridge UI
+          language until you pick one here. Names changed in the Home app are
+          never touched.
+        </div>
+      </div>
       <div class="dlp-opts mb-1">
         <div class="dlp-opt">
           <div class="dlp-opt-main">
@@ -155,6 +166,7 @@
   let orphanSwingSwitches = [];     // climateSwingSwitches entries matching no device
   let nameValue = defaultName;
   let debugValue = false;
+  let languageValue = 'en';         // resolved at init: config value, else the Homebridge UI language
   let lastScan = [];                // devices reported by the last scan
   let scanDone = false;             // at least one scan finished
 
@@ -174,6 +186,56 @@
   };
   const looksLikeKey = (value) => /^\d{13}$/.test(String(value).trim());
 
+  // The language dropdown mirrors the Homebridge UI's own language setting
+  // (homebridge-config-ui-x) — same codes, same labels, same order — so it
+  // reads exactly like the selector the user picked their UI language in.
+  const LANGUAGES = [
+    { code: 'bg', label: 'Bulgarian (bg)' },
+    { code: 'ca', label: 'Catalan (ca)' },
+    { code: 'zh-CN', label: 'Chinese - Simplified (zh-CN)' },
+    { code: 'zh-TW', label: 'Chinese - Traditional (zh-TW)' },
+    { code: 'cs', label: 'Czech (cs)' },
+    { code: 'nl', label: 'Dutch (nl)' },
+    { code: 'en', label: 'English (en)' },
+    { code: 'fi', label: 'Finnish (fi)' },
+    { code: 'fr', label: 'French (fr)' },
+    { code: 'de', label: 'German (de)' },
+    { code: 'he', label: 'Hebrew (he)' },
+    { code: 'hu', label: 'Hungarian (hu)' },
+    { code: 'id', label: 'Indonesian (id)' },
+    { code: 'it', label: 'Italian (it)' },
+    { code: 'ja', label: 'Japanese (ja)' },
+    { code: 'ko', label: 'Korean (ko)' },
+    { code: 'mk', label: 'Macedonian (mk)' },
+    { code: 'no', label: 'Norwegian (no)' },
+    { code: 'pl', label: 'Polish (pl)' },
+    { code: 'pt-BR', label: 'Portuguese (Brazil)' },
+    { code: 'pt', label: 'Portuguese (Portugal)' },
+    { code: 'ru', label: 'Russian (ru)' },
+    { code: 'sl', label: 'Slovenian (sl)' },
+    { code: 'es', label: 'Spanish (es)' },
+    { code: 'sv', label: 'Swedish (sv)' },
+    { code: 'th', label: 'Thai (th)' },
+    { code: 'tr', label: 'Turkish (tr)' },
+    { code: 'uk', label: 'Ukrainian (uk)' },
+  ];
+
+  // Resolve a language code to a dropdown entry: exact match first, then the
+  // base language ('de-AT' -> 'de'). Returns null when unknown.
+  const normalizeLang = (value) => {
+    if (typeof value !== 'string' || value.trim() === '') {
+      return null;
+    }
+    const wanted = value.trim().toLowerCase();
+    const exact = LANGUAGES.find((lang) => lang.code.toLowerCase() === wanted);
+    if (exact) {
+      return exact.code;
+    }
+    const base = wanted.split('-')[0];
+    const baseMatch = LANGUAGES.find((lang) => lang.code.toLowerCase() === base);
+    return baseMatch ? baseMatch.code : null;
+  };
+
   // ------------------------------------------------------------------
   // Config I/O (read-modify-write; preserves fields we don't own)
   // ------------------------------------------------------------------
@@ -188,6 +250,9 @@
     config.name = nameValue.trim() || defaultName;
     config.climateIPs = deviceRows.map((row) => row.value.trim()).filter((value) => value !== '');
     config.debugMode = debugValue;
+    // Always written, even untouched: the resolved default (the Homebridge
+    // UI language) must reach the plugin runtime, which cannot ask the UI.
+    config.language = languageValue;
 
     // The platform looks keys up by the exact climateIPs entry (port
     // included), so device-attached keys are written under row.value;
@@ -896,7 +961,15 @@
   const advChevron = document.getElementById('dlpAdvChevron');
   const advBody = document.getElementById('dlpAdvBody');
   const nameInput = document.getElementById('dlpName');
+  const languageSelect = document.getElementById('dlpLanguage');
   const debugInput = document.getElementById('dlpDebug');
+
+  for (const lang of LANGUAGES) {
+    const option = document.createElement('option');
+    option.value = lang.code;
+    option.textContent = lang.label;
+    languageSelect.appendChild(option);
+  }
 
   advToggle.addEventListener('click', () => {
     const expanded = advBody.style.display === 'none';
@@ -906,6 +979,7 @@
   });
 
   nameInput.addEventListener('input', () => { nameValue = nameInput.value; sync(); });
+  languageSelect.addEventListener('change', () => { languageValue = languageSelect.value; sync(); });
   debugInput.addEventListener('change', () => { debugValue = debugInput.checked; sync(); });
 
   // ------------------------------------------------------------------
@@ -963,7 +1037,21 @@
   nameValue = typeof config.name === 'string' && config.name !== '' ? config.name : defaultName;
   debugValue = config.debugMode === true;
 
+  // Language: a configured value wins; otherwise default to the language the
+  // Homebridge UI is currently displayed in (written to the config with the
+  // next save, so the plugin runtime sees the same default).
+  languageValue = normalizeLang(config.language);
+  if (!languageValue) {
+    try {
+      languageValue = normalizeLang(await homebridge.i18nCurrentLang());
+    } catch (e) {
+      languageValue = null;
+    }
+  }
+  languageValue = languageValue || 'en';
+
   nameInput.value = nameValue;
+  languageSelect.value = languageValue;
   debugInput.checked = debugValue;
   renderDevices();
 

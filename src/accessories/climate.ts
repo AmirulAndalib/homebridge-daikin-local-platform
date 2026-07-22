@@ -12,6 +12,7 @@ import {
   FAN_SPEED_TABLE
 } from '../daikin-local';
 import {DaikinLocalAPI, DaikinDevice} from '../daikin-local';
+import { getServiceNames, isDefaultServiceName, ServiceNames, ServiceNameKey } from '../i18n';
 
 
 /**
@@ -32,12 +33,16 @@ export default class ClimateAccessory {
   private _supportsOutdoorTemperature = true;
   private _supportsSwingVertical = false;
   private _supportsSwingHorizontal = false;
+  // Localized default service names (language config field).
+  private _names: ServiceNames;
 
   constructor(
     private readonly platform: DaikinPlatform,
     private readonly accessory: PlatformAccessory<DaikinAccessoryContext>,
   ) {
 
+
+    this._names = getServiceNames(platform.platformConfig.language);
 
     accessory.context.device.setCallback(this.updateDeviceStatus.bind(this));
 
@@ -68,7 +73,7 @@ export default class ClimateAccessory {
     // This is what is displayed as the default name on the Home app
     this.services['Climate'].setCharacteristic(
       this.platform.Characteristic.Name,
-      accessory.context.device?.getDeviceName() || '空調',
+      accessory.context.device?.getDeviceName() || this._names.airConditioner,
     );
 
     this.services['Climate']
@@ -208,12 +213,12 @@ export default class ClimateAccessory {
         this.services['Climate'].getCharacteristic(this.platform.Characteristic.SwingMode));
     }
 
-    const swingSwitches: { key: string; subtype: string; name: string; supported: boolean;
+    const swingSwitches: { key: string; subtype: string; nameKey: ServiceNameKey; supported: boolean;
       onGet: () => Promise<CharacteristicValue>; onSet: (value: CharacteristicValue) => Promise<void>; }[] = [
-      { key: 'VerticalSwing', subtype: 'swing-vertical', name: 'Vertical Swing',
+      { key: 'VerticalSwing', subtype: 'swing-vertical', nameKey: 'verticalSwing',
         supported: this._supportsSwingVertical,
         onGet: this.getVerticalSwingSwitch.bind(this), onSet: this.setVerticalSwingSwitch.bind(this) },
-      { key: 'HorizontalSwing', subtype: 'swing-horizontal', name: 'Horizontal Swing',
+      { key: 'HorizontalSwing', subtype: 'swing-horizontal', nameKey: 'horizontalSwing',
         supported: this._supportsSwingHorizontal,
         onGet: this.getHorizontalSwingSwitch.bind(this), onSet: this.setHorizontalSwingSwitch.bind(this) },
     ];
@@ -224,17 +229,13 @@ export default class ClimateAccessory {
 
       if (exposeSwingSwitches && swingSwitch.supported) {
         let service = this.accessory.getServiceById(this.platform.Service.Switch, swingSwitch.subtype);
+        const created = !service;
 
         if (!service) {
-          // Name the switch only on creation: renames done in the Home app
-          // land in ConfiguredName, and re-setting it on every restart would
-          // wipe them out. HomeKit has no name localization — English default,
-          // the user renames it in the Home app if they want another language.
-          service = this.accessory.addService(this.platform.Service.Switch, swingSwitch.name, swingSwitch.subtype);
-          service.setCharacteristic(this.platform.Characteristic.Name, swingSwitch.name);
-          service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
-          service.setCharacteristic(this.platform.Characteristic.ConfiguredName, swingSwitch.name);
+          service = this.accessory.addService(
+            this.platform.Service.Switch, this._names[swingSwitch.nameKey], swingSwitch.subtype);
         }
+        this.applyDefaultServiceName(service, swingSwitch.nameKey, created);
 
         this.services[swingSwitch.key] = service;
         this.services[swingSwitch.key].getCharacteristic(this.platform.Characteristic.On)
@@ -289,9 +290,11 @@ export default class ClimateAccessory {
     if (this._supportsOutdoorTemperature) {
       // Separate service so it doesn't collide with HeaterCooler's
       // CurrentTemperature, which reports the indoor value.
-      this.services['OutdoorTemperatureSensor'] =
-        this.accessory.getServiceById(this.platform.Service.TemperatureSensor, 'outdoor')
-        || this.accessory.addService(this.platform.Service.TemperatureSensor, 'Outdoor Temperature', 'outdoor');
+      const restoredOutdoor = this.accessory.getServiceById(this.platform.Service.TemperatureSensor, 'outdoor');
+      this.services['OutdoorTemperatureSensor'] = restoredOutdoor
+        || this.accessory.addService(
+          this.platform.Service.TemperatureSensor, this._names.outdoorTemperature, 'outdoor');
+      this.applyDefaultServiceName(this.services['OutdoorTemperatureSensor'], 'outdoorTemperature', !restoredOutdoor);
 
       this.services['OutdoorTemperatureSensor']
         .getCharacteristic(this.platform.Characteristic.CurrentTemperature)
@@ -311,6 +314,40 @@ export default class ClimateAccessory {
     //////////
     // Update characteristic values asynchronously instead of using onGet handlers
     this.refreshDeviceStatus();
+  }
+
+  // Apply the localized default name to a plugin-created service. On
+  // creation the name and its ConfiguredName (where Home-app renames land)
+  // are always set. A restored service is only renamed while its name is
+  // still one of this plugin's defaults (in any language) AND differs from
+  // the wanted one — a rename done in the Home app must survive restarts
+  // and language changes. The equality bail-out doubles as upgrade safety:
+  // outdoor sensors restored from pre-1.5.1 accessories carry no
+  // ConfiguredName, and adding one without actually changing the visible
+  // name could clobber a rename the user did in the Home app (those live
+  // only in HomeKit's own database, invisible to the plugin).
+  private applyDefaultServiceName(service: Service, key: ServiceNameKey, created: boolean) {
+    const name = this._names[key];
+    const hasConfiguredName = service.testCharacteristic(this.platform.Characteristic.ConfiguredName);
+
+    if (!created) {
+      const current = hasConfiguredName
+        ? service.getCharacteristic(this.platform.Characteristic.ConfiguredName).value
+        : service.getCharacteristic(this.platform.Characteristic.Name).value;
+
+      if (typeof current === 'string' && current.trim() !== '' && !isDefaultServiceName(key, current)) {
+        return;
+      }
+      if (current === name) {
+        return;
+      }
+    }
+
+    service.setCharacteristic(this.platform.Characteristic.Name, name);
+    if (!hasConfiguredName) {
+      service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+    }
+    service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
   }
 
 

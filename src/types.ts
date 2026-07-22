@@ -14,6 +14,10 @@ export interface DaikinPlatformConfig extends PlatformConfig {
   // climateIPs entries of units that get the per-axis Vertical/Horizontal
   // Swing switches in addition to the HeaterCooler's binary SwingMode.
   climateSwingSwitches?: Array<string>;
+  // Language for the default HomeKit names of plugin-created services (see
+  // src/i18n.ts). Same codes as the Homebridge UI languages; the settings
+  // UI defaults it to the language selected there. Absent = English.
+  language?: string;
   debugMode: boolean;
 }
 
